@@ -8,6 +8,7 @@ const nextConfig = {
     }
     return config;
   },
+  // PDF.js worker headers (handled by Vercel config)
 }
 
 module.exports = nextConfig

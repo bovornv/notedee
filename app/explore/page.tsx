@@ -6,54 +6,9 @@ import { useAuthStore } from "@/store/authStore";
 import { usePracticeStore } from "@/store/practiceStore";
 import { useLanguageStore } from "@/store/languageStore";
 import { MusicPiece } from "@/types";
-import { Search, Music } from "lucide-react";
+import { Search, Music, Star, Upload } from "lucide-react";
 import { t } from "@/lib/translations";
-
-// Public domain pieces
-const PUBLIC_PIECES: MusicPiece[] = [
-  {
-    id: "1",
-    title: "Twinkle Twinkle Little Star",
-    composer: "Traditional",
-    type: "public_domain",
-    fileUrl: "/samples/twinkle.pdf",
-  },
-  {
-    id: "2",
-    title: "Mary Had a Little Lamb",
-    composer: "Traditional",
-    type: "public_domain",
-    fileUrl: "/samples/mary.pdf",
-  },
-  {
-    id: "3",
-    title: "Happy Birthday",
-    composer: "Traditional",
-    type: "public_domain",
-    fileUrl: "/samples/happy-birthday.pdf",
-  },
-  {
-    id: "4",
-    title: "Row Row Row Your Boat",
-    composer: "Traditional",
-    type: "public_domain",
-    fileUrl: "/samples/row-boat.pdf",
-  },
-  {
-    id: "5",
-    title: "London Bridge",
-    composer: "Traditional",
-    type: "public_domain",
-    fileUrl: "/samples/london-bridge.pdf",
-  },
-  {
-    id: "6",
-    title: "Yankee Doodle",
-    composer: "Traditional",
-    type: "public_domain",
-    fileUrl: "/samples/yankee-doodle.pdf",
-  },
-];
+import { getStarterLibrary, isStarterSong } from "@/lib/starterLibrary";
 
 export default function ExplorePage() {
   const router = useRouter();
@@ -61,7 +16,8 @@ export default function ExplorePage() {
   const { language, initialize } = useLanguageStore();
   const { setSelectedPiece, resetSteps2And3 } = usePracticeStore();
   const [searchQuery, setSearchQuery] = useState("");
-  const [filteredPieces, setFilteredPieces] = useState(PUBLIC_PIECES);
+  const [availablePieces] = useState<MusicPiece[]>(getStarterLibrary());
+  const [filteredPieces, setFilteredPieces] = useState<MusicPiece[]>(getStarterLibrary());
 
   useEffect(() => {
     initialize();
@@ -75,23 +31,42 @@ export default function ExplorePage() {
 
   useEffect(() => {
     if (searchQuery.trim() === "") {
-      setFilteredPieces(PUBLIC_PIECES);
+      setFilteredPieces(availablePieces);
     } else {
       const query = searchQuery.toLowerCase();
       setFilteredPieces(
-        PUBLIC_PIECES.filter(
+        availablePieces.filter(
           (piece) =>
             piece.title.toLowerCase().includes(query) ||
             piece.composer?.toLowerCase().includes(query)
         )
       );
     }
-  }, [searchQuery]);
+  }, [searchQuery, availablePieces]);
 
   const handleSelectPiece = (piece: MusicPiece) => {
+    // Starter songs are hard-bound to their PDFs - load immediately, no verification
+    // If PDF is missing, SheetMusicViewer will handle it gracefully
     resetSteps2And3();
     setSelectedPiece(piece);
     router.push("/main");
+  };
+
+  const handleUploadFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && (file.type === "application/pdf" || file.type.startsWith("image/"))) {
+      const fileUrl = URL.createObjectURL(file);
+      const uploadedPiece: MusicPiece = {
+        id: `upload-${Date.now()}`,
+        title: file.name.replace(/\.[^/.]+$/, ""),
+        composer: "User Upload",
+        type: "user_upload",
+        fileUrl,
+      };
+      resetSteps2And3();
+      setSelectedPiece(uploadedPiece);
+      router.push("/main");
+    }
   };
 
   if (!user) {
@@ -116,29 +91,76 @@ export default function ExplorePage() {
         </div>
       </div>
 
+      {/* Upload Your Own Sheet Music - Always Visible */}
+      <div className="mb-6">
+        <label className="flex cursor-pointer items-center justify-center gap-3 rounded-lg border-2 border-dashed border-border bg-background px-6 py-4 transition-colors hover:bg-accent">
+          <Upload className="h-5 w-5 text-foreground" />
+          <span className="font-medium">
+            {language === "en" ? "Upload Your Own Sheet Music (PDF or Image)" : "อัปโหลดโน้ตเพลงของคุณเอง (PDF หรือรูปภาพ)"}
+          </span>
+          <input
+            type="file"
+            accept=".pdf,image/*"
+            onChange={handleUploadFile}
+            className="hidden"
+          />
+        </label>
+      </div>
+
       {/* Song List */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {filteredPieces.length === 0 ? (
-          <div className="col-span-full py-12 text-center text-muted">
-            {language === "en" ? "No songs found" : "ไม่พบเพลงที่ค้นหา"}
+          <div className="col-span-full rounded-lg border border-border bg-background p-8 text-center">
+            <Music className="mx-auto mb-4 h-12 w-12 text-muted" />
+            <h3 className="mb-2 text-lg font-semibold">
+              {language === "en" ? "No songs found" : "ไม่พบเพลงที่ค้นหา"}
+            </h3>
+            <p className="mb-4 text-sm text-muted">
+              {language === "en"
+                ? "Try a different search term or upload your own sheet music above."
+                : "ลองค้นหาด้วยคำอื่นหรืออัปโหลดโน้ตเพลงของคุณเองด้านบน"}
+            </p>
           </div>
         ) : (
           filteredPieces.map((piece) => (
-            <button
+            <div
               key={piece.id}
-              onClick={() => handleSelectPiece(piece)}
-              className="flex items-start gap-4 rounded-lg border border-border bg-background p-4 text-left transition-colors hover:bg-accent"
+              className="flex flex-col rounded-lg border border-border bg-background p-4 transition-colors hover:bg-accent"
             >
-              <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded bg-accent">
-                <Music className="h-6 w-6 text-foreground" />
+              <div className="mb-3 flex items-start gap-3">
+                <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded bg-accent">
+                  <Music className="h-6 w-6 text-foreground" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="mb-1 font-semibold">{piece.title}</h3>
+                  {piece.composer && (
+                    <p className="mb-2 text-sm text-muted">{piece.composer}</p>
+                  )}
+                  {/* Difficulty Stars */}
+                  {piece.difficulty && (
+                    <div className="flex gap-0.5">
+                      {[1, 2, 3].map((level) => (
+                        <Star
+                          key={level}
+                          className={`h-4 w-4 ${
+                            level <= piece.difficulty!
+                              ? "fill-warning text-warning"
+                              : "text-muted"
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="flex-1">
-                <h3 className="mb-1 font-semibold">{piece.title}</h3>
-                {piece.composer && (
-                  <p className="text-sm text-muted">{piece.composer}</p>
-                )}
-              </div>
-            </button>
+              {/* Open Button */}
+              <button
+                onClick={() => handleSelectPiece(piece)}
+                className="mt-auto w-full rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90"
+              >
+                {language === "en" ? "Open" : "เปิด"}
+              </button>
+            </div>
           ))
         )}
       </div>

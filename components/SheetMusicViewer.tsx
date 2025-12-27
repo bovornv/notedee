@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import { NoteFeedback, MusicPiece } from "@/types";
 import { ZoomIn, ZoomOut, Maximize2, RotateCcw } from "lucide-react";
+import { isStarterSong } from "@/lib/starterLibrary";
 
 if (typeof window !== "undefined") {
   pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
@@ -20,6 +21,7 @@ interface SheetMusicViewerProps {
   metronomeEnabled?: boolean;
   recordingStartTime?: number | null;
   notationData?: MusicPiece["notationData"]; // Structured notation if available
+  selectedPiece?: MusicPiece | null; // Pass selected piece to check if it's a starter song
 }
 
 export default function SheetMusicViewer({
@@ -33,6 +35,7 @@ export default function SheetMusicViewer({
   metronomeEnabled = false,
   recordingStartTime = null,
   notationData,
+  selectedPiece = null,
 }: SheetMusicViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -93,17 +96,9 @@ export default function SheetMusicViewer({
           return;
         }
       } else {
-        // For regular URLs, check if file exists first
-        try {
-          const headResponse = await fetch(fileUrl, { method: "HEAD" });
-          if (!headResponse.ok && headResponse.status === 404) {
-            setError("NO_FILE");
-            setLoading(false);
-            return;
-          }
-        } catch (checkError) {
-          // If HEAD fails, try to load anyway (might be CORS issue)
-        }
+        // For regular URLs (like /sheet-music/*.pdf), try to load directly
+        // Don't check HEAD first as it may fail due to CORS or server config
+        // PDF.js will handle the error if the file doesn't exist
       }
 
       const loadingTask = pdfjsLib.getDocument({
@@ -128,13 +123,24 @@ export default function SheetMusicViewer({
 
       const viewport = page.getViewport({ scale });
       const canvas = canvasRef.current;
-      if (!canvas) return;
+      if (!canvas) {
+        setError("RENDER_ERROR");
+        setLoading(false);
+        return;
+      }
 
       canvas.height = viewport.height;
       canvas.width = viewport.width;
 
       const context = canvas.getContext("2d");
-      if (!context) return;
+      if (!context) {
+        setError("RENDER_ERROR");
+        setLoading(false);
+        return;
+      }
+
+      // Clear canvas before rendering
+      context.clearRect(0, 0, canvas.width, canvas.height);
 
       await page.render({
         canvasContext: context,
@@ -142,10 +148,25 @@ export default function SheetMusicViewer({
       }).promise;
 
       drawFeedback(context, canvas.width, canvas.height);
+      
+      // Update refs for auto-scroll
+      canvasHeightRef.current = canvas.height;
+      systemHeightRef.current = Math.max(200, canvas.height / 5);
+      
       setLoading(false);
+      setError(null); // Clear any previous errors
     } catch (err: any) {
       console.error("Error loading PDF:", err);
-      setError("NO_FILE");
+      // Check if it's a file not found error
+      if (err.name === "MissingPDFException" || 
+          err.message?.includes("404") || 
+          err.message?.includes("Failed to fetch") ||
+          err.message?.includes("NetworkError") ||
+          err.message?.includes("file not found")) {
+        setError("FILE_NOT_FOUND");
+      } else {
+        setError("RENDER_ERROR");
+      }
       setLoading(false);
     }
   }, [fileUrl, zoom, fitToWidth]);
@@ -181,22 +202,32 @@ export default function SheetMusicViewer({
         canvas.height = img.height * scale;
 
         const context = canvas.getContext("2d");
-        if (!context) return;
+        if (!context) {
+          setError("RENDER_ERROR");
+          setLoading(false);
+          return;
+        }
 
+        // Clear canvas before rendering
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        
         context.drawImage(img, 0, 0, canvas.width, canvas.height);
         drawFeedback(context, canvas.width, canvas.height);
+        canvasHeightRef.current = canvas.height;
+        systemHeightRef.current = Math.max(200, canvas.height / 5);
         setLoading(false);
+        setError(null); // Clear any previous errors
       };
 
       img.onerror = () => {
-        setError("NO_FILE");
+        setError("RENDER_ERROR");
         setLoading(false);
       };
 
       img.src = fileUrl;
     } catch (err) {
       console.error("Error loading image:", err);
-      setError("NO_FILE");
+      setError("RENDER_ERROR");
       setLoading(false);
     }
   }, [fileUrl, zoom, fitToWidth]);
@@ -492,8 +523,11 @@ export default function SheetMusicViewer({
     }
   };
 
-  // Show upload UI when no file exists - NO placeholder notation
-  if (error === "NO_FILE" || error === "FILE_NOT_FOUND" || !fileUrl) {
+  // Starter songs are hard-bound to their PDFs - never show upload screen for them
+  const isStarter = selectedPiece ? isStarterSong(selectedPiece) : false;
+  
+  // Show upload UI when no file exists - but NEVER for starter songs
+  if ((error === "NO_FILE" || error === "FILE_NOT_FOUND" || !fileUrl) && !isStarter && onFileUpload) {
     return (
       <div className="flex h-full items-center justify-center bg-white p-8">
         <div className="w-full max-w-md text-center">
@@ -565,7 +599,11 @@ export default function SheetMusicViewer({
       className={`relative h-full w-full overflow-auto bg-white ${autoScrollEnabled ? 'scroll-smooth' : ''}`}
       ref={containerRef}
       onScroll={handleScroll}
-      style={autoScrollEnabled ? { scrollBehavior: 'auto' } : {}}
+      style={{
+        ...(autoScrollEnabled ? { scrollBehavior: 'auto' } : {}),
+        minHeight: '400px', // Ensure minimum height
+        height: '100%', // Explicit height
+      }}
     >
       {/* Zoom Controls - Sticky so they stay visible during scroll */}
       <div className="sticky top-4 right-4 z-10 float-right flex gap-2 rounded-lg border border-border bg-background p-2 shadow-sm">
@@ -627,8 +665,41 @@ export default function SheetMusicViewer({
       <canvas
         ref={canvasRef}
         className="mx-auto block max-w-full"
-        style={{ display: loading ? "none" : "block", minHeight: "400px" }}
+        style={{ 
+          display: loading || error ? "none" : "block", 
+          minHeight: "400px",
+          visibility: loading || error ? "hidden" : "visible"
+        }}
       />
+      
+      {/* Error state - show clear error instead of blank screen */}
+      {(error === "RENDER_ERROR" || error === "FILE_NOT_FOUND" || error === "NO_FILE") && !loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white p-8 z-30">
+          <div className="text-center">
+            <div className="mb-4 text-lg font-semibold text-error">
+              {error === "FILE_NOT_FOUND" || error === "NO_FILE" ? "Sheet music file not found" : "Failed to render sheet music"}
+            </div>
+            <p className="mb-4 text-sm text-muted">
+              {error === "FILE_NOT_FOUND" || error === "NO_FILE"
+                ? `The PDF file "${fileUrl}" could not be found. ${isStarter ? "Please ensure the file exists in /public/sheet-music/ directory." : "Please upload a file or check the file path."}`
+                : "The PDF file could not be displayed. Please try again or upload a different file."}
+            </p>
+            {onFileUpload && !isStarter && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background hover:bg-foreground/90"
+              >
+                Upload Different File
+              </button>
+            )}
+            {isStarter && fileUrl && (
+              <p className="text-xs text-muted mt-4">
+                Expected file location: <code className="bg-accent px-2 py-1 rounded">{fileUrl}</code>
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

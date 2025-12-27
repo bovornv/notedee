@@ -36,6 +36,7 @@ export interface MusicPiece {
   type: "public_domain" | "user_upload";
   fileUrl: string;
   thumbnailUrl?: string;
+  difficulty?: 1 | 2 | 3; // ⭐ / ⭐⭐ / ⭐⭐⭐
   // Structured notation data (Mode A - precise)
   notationData?: {
     timeSignature: { numerator: number; denominator: number }; // e.g., { numerator: 4, denominator: 4 }

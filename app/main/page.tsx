@@ -152,6 +152,7 @@ export default function MainPage() {
   }
 
   // Priority: uploaded file > selected piece file
+  // When selecting from explore, selectedPiece.fileUrl should be used
   const activeFileUrl = uploadedFileUrl || selectedPiece?.fileUrl || null;
   const fileType =
     activeFileUrl?.endsWith(".pdf") ||
@@ -161,7 +162,9 @@ export default function MainPage() {
 
   const hasRecording = !!recordedAudio && !isRecording;
   const hasAnalysis = feedback.length > 0;
-  const hasRealMusic = !!activeFileUrl && !activeFileUrl.includes("/samples/");
+  // Starter songs (public_domain) are hard-bound to their PDFs - always treat as real music
+  // User uploads are also real music
+  const hasRealMusic = !!activeFileUrl && (selectedPiece?.type === "public_domain" || selectedPiece?.type === "user_upload");
 
   const handleFileUpload = (file: File) => {
     if (file && (file.type === "application/pdf" || file.type.startsWith("image/"))) {
@@ -411,6 +414,7 @@ export default function MainPage() {
             metronomeEnabled={metronomeEnabled}
             recordingStartTime={recordingStartTimeRef.current}
             notationData={selectedPiece?.notationData}
+            selectedPiece={selectedPiece}
           />
         </div>
       </div>
