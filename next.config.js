@@ -1,6 +1,13 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Allow ESLint warnings during build (only errors will fail)
+  eslint: {
+    ignoreDuringBuilds: false,
+  },
+  typescript: {
+    ignoreBuildErrors: false,
+  },
   // Fix for PDF.js canvas issues
   webpack: (config, { isServer }) => {
     if (!isServer) {
