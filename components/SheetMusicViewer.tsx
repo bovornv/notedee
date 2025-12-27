@@ -70,6 +70,50 @@ export default function SheetMusicViewer({
     }
   }, [loading, canvasRef.current?.height]);
 
+  const drawFeedback = useCallback((
+    context: CanvasRenderingContext2D,
+    width: number,
+    height: number
+  ) => {
+    if (feedback.length === 0) return;
+
+    // Group feedback by bar
+    const feedbackByBar = feedback.reduce((acc, f) => {
+      if (!acc[f.bar]) acc[f.bar] = [];
+      acc[f.bar].push(f);
+      return acc;
+    }, {} as Record<number, NoteFeedback[]>);
+
+    // Draw colored overlays for each bar
+    Object.entries(feedbackByBar).forEach(([barStr, notes]) => {
+      const bar = parseInt(barStr);
+      const barWidth = width / Math.max(Object.keys(feedbackByBar).length, 1);
+      const x = (bar - 1) * barWidth;
+
+      // Determine bar color based on worst accuracy in bar
+      const worstAccuracy = notes.reduce((worst, note) => {
+        if (note.accuracy === "wrong") return "wrong";
+        if (note.accuracy === "slightly_off" && worst !== "wrong")
+          return "slightly_off";
+        return worst;
+      }, "correct" as NoteFeedback["accuracy"]);
+
+      const colors = {
+        correct: "rgba(15, 123, 15, 0.2)",
+        slightly_off: "rgba(217, 119, 6, 0.2)",
+        wrong: "rgba(220, 38, 38, 0.2)",
+      };
+
+      context.fillStyle = colors[worstAccuracy];
+      context.fillRect(x, 0, barWidth, height);
+
+      // Draw bar number
+      context.fillStyle = "#37352f";
+      context.font = "16px sans-serif";
+      context.fillText(`Bar ${bar}`, x + 10, 30);
+    });
+  }, [feedback]);
+
   const loadPDF = useCallback(async () => {
     if (!fileUrl) {
       setError("NO_FILE");
@@ -169,7 +213,7 @@ export default function SheetMusicViewer({
       }
       setLoading(false);
     }
-  }, [fileUrl, zoom, fitToWidth]);
+  }, [fileUrl, zoom, fitToWidth, drawFeedback]);
 
   const loadImage = useCallback(async () => {
     if (!fileUrl) {
@@ -230,7 +274,7 @@ export default function SheetMusicViewer({
       setError("RENDER_ERROR");
       setLoading(false);
     }
-  }, [fileUrl, zoom, fitToWidth]);
+  }, [fileUrl, zoom, fitToWidth, drawFeedback]);
 
   useEffect(() => {
     if (!fileUrl) {
@@ -255,7 +299,7 @@ export default function SheetMusicViewer({
         loadImage();
       }
     }
-  }, [zoom, fitToWidth]);
+  }, [zoom, fitToWidth, loading, error, fileUrl, fileType, loadPDF, loadImage]);
 
   // Restore scroll position after render
   useEffect(() => {
@@ -447,51 +491,7 @@ export default function SheetMusicViewer({
         scrollAnimationRef.current = null;
       }
     };
-  }, [autoScrollEnabled, tempo, timeSignature, recordingStartTime, loading, hasStructuredNotation, notationData]);
-
-  const drawFeedback = (
-    context: CanvasRenderingContext2D,
-    width: number,
-    height: number
-  ) => {
-    if (feedback.length === 0) return;
-
-    // Group feedback by bar
-    const feedbackByBar = feedback.reduce((acc, f) => {
-      if (!acc[f.bar]) acc[f.bar] = [];
-      acc[f.bar].push(f);
-      return acc;
-    }, {} as Record<number, NoteFeedback[]>);
-
-    // Draw colored overlays for each bar
-    Object.entries(feedbackByBar).forEach(([barStr, notes]) => {
-      const bar = parseInt(barStr);
-      const barWidth = width / Math.max(Object.keys(feedbackByBar).length, 1);
-      const x = (bar - 1) * barWidth;
-
-      // Determine bar color based on worst accuracy in bar
-      const worstAccuracy = notes.reduce((worst, note) => {
-        if (note.accuracy === "wrong") return "wrong";
-        if (note.accuracy === "slightly_off" && worst !== "wrong")
-          return "slightly_off";
-        return worst;
-      }, "correct" as NoteFeedback["accuracy"]);
-
-      const colors = {
-        correct: "rgba(15, 123, 15, 0.2)",
-        slightly_off: "rgba(217, 119, 6, 0.2)",
-        wrong: "rgba(220, 38, 38, 0.2)",
-      };
-
-      context.fillStyle = colors[worstAccuracy];
-      context.fillRect(x, 0, barWidth, height);
-
-      // Draw bar number
-      context.fillStyle = "#37352f";
-      context.font = "16px sans-serif";
-      context.fillText(`Bar ${bar}`, x + 10, 30);
-    });
-  };
+  }, [autoScrollEnabled, tempo, timeSignature, recordingStartTime, loading, hasStructuredNotation, notationData, beatsPerMeasure]);
 
   const handleZoomIn = () => {
     setZoom((prev) => Math.min(2, prev + 0.25));
@@ -553,7 +553,7 @@ export default function SheetMusicViewer({
                 : "Sheet music not found"}
             </h3>
             <p className="mb-6 text-sm text-muted">
-              This piece doesn't have sheet music yet. Upload your own to continue.
+              This piece doesn&apos;t have sheet music yet. Upload your own to continue.
             </p>
           </div>
 

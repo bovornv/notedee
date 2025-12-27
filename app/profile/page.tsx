@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { useAuthStore } from "@/store/authStore";
 import { useLanguageStore } from "@/store/languageStore";
 import { LogOut, User, Crown, Upload, X } from "lucide-react";
@@ -80,10 +81,13 @@ export default function ProfilePage() {
         <div className="mb-4 flex items-center gap-4">
           <div className="relative">
             {profileImage ? (
-              <img
+              <Image
                 src={profileImage}
                 alt="Profile"
+                width={64}
+                height={64}
                 className="h-16 w-16 rounded-full object-cover"
+                unoptimized
               />
             ) : (
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-accent">
