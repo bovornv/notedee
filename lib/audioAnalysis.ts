@@ -214,3 +214,138 @@ export async function analyzeAudio(
 
   return { feedback, overallAccuracy, mainIssues };
 }
+
+// Analyze a single measure's audio (for delayed measure-level feedback)
+export async function analyzeMeasure(
+  audioBuffer: AudioBuffer,
+  measureNumber: number,
+  measureStartTime: number,
+  measureDuration: number,
+  expectedNotes: Array<{ bar: number; noteIndex: number; note: string; time: number }>
+): Promise<{ feedback: NoteFeedback[]; measureAccuracy: number } | null> {
+  const sampleRate = audioBuffer.sampleRate;
+  const channelData = audioBuffer.getChannelData(0);
+  const frameSize = 2048;
+  
+  // Filter expected notes for this measure
+  const measureNotes = expectedNotes.filter(
+    (note) => note.bar === measureNumber && note.time >= measureStartTime && note.time < measureStartTime + measureDuration
+  );
+
+  if (measureNotes.length === 0) {
+    // No expected notes for this measure - return neutral feedback
+    return {
+      feedback: [],
+      measureAccuracy: 0,
+    };
+  }
+
+  const feedback: NoteFeedback[] = [];
+  let correctCount = 0;
+  let totalCount = 0;
+
+  // Analyze each note in the measure
+  for (const expected of measureNotes) {
+    // Adjust time relative to measure start
+    const relativeTime = expected.time - measureStartTime;
+    const startSample = Math.floor(relativeTime * sampleRate);
+    const endSample = Math.min(startSample + frameSize, channelData.length);
+
+    if (startSample >= channelData.length) {
+      feedback.push({
+        bar: expected.bar,
+        noteIndex: expected.noteIndex,
+        expectedNote: expected.note,
+        accuracy: "wrong",
+        issues: ["Missed entry"],
+        timing: 0,
+      });
+      totalCount++;
+      continue;
+    }
+
+    const segment = channelData.slice(startSample, endSample);
+
+    if (segment.length < 512) {
+      feedback.push({
+        bar: expected.bar,
+        noteIndex: expected.noteIndex,
+        expectedNote: expected.note,
+        accuracy: "wrong",
+        issues: ["Missed entry"],
+        timing: 0,
+      });
+      totalCount++;
+      continue;
+    }
+
+    let detectedFreq: number | null = null;
+    try {
+      detectedFreq = detectPitch(segment);
+    } catch (error) {
+      console.error("Pitch detection error:", error);
+    }
+
+    if (!detectedFreq || detectedFreq < 100 || detectedFreq > 2000) {
+      feedback.push({
+        bar: expected.bar,
+        noteIndex: expected.noteIndex,
+        expectedNote: expected.note,
+        accuracy: "wrong",
+        issues: ["Missed entry"],
+        timing: 0,
+      });
+      totalCount++;
+      continue;
+    }
+
+    const expectedFreq = NOTE_FREQUENCIES[expected.note] || 440;
+    const accuracy = getNoteAccuracy(expectedFreq, detectedFreq);
+    const playedNote = frequencyToNote(detectedFreq);
+
+    const noteIssues: string[] = [];
+    if (accuracy === "wrong") {
+      if (detectedFreq < expectedFreq * 0.95) {
+        noteIssues.push("Flat note");
+      } else if (detectedFreq > expectedFreq * 1.05) {
+        noteIssues.push("Sharp note");
+      } else {
+        noteIssues.push("Wrong note");
+      }
+    } else if (accuracy === "slightly_off") {
+      if (detectedFreq < expectedFreq) {
+        noteIssues.push("Slightly flat");
+      } else {
+        noteIssues.push("Slightly sharp");
+      }
+    }
+
+    const detectedTime = startSample / sampleRate;
+    const timing = calculateTimingOffset(relativeTime, detectedTime);
+
+    if (Math.abs(timing) > 100) {
+      if (timing > 0) {
+        noteIssues.push("Late");
+      } else {
+        noteIssues.push("Early");
+      }
+    }
+
+    feedback.push({
+      bar: expected.bar,
+      noteIndex: expected.noteIndex,
+      expectedNote: expected.note,
+      playedNote,
+      accuracy,
+      issues: noteIssues,
+      timing,
+    });
+
+    if (accuracy === "correct") correctCount++;
+    totalCount++;
+  }
+
+  const measureAccuracy = totalCount > 0 ? (correctCount / totalCount) * 100 : 0;
+
+  return { feedback, measureAccuracy };
+}

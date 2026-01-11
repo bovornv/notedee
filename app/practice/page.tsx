@@ -12,7 +12,7 @@ import MicIndicator from "@/components/MicIndicator";
 import Countdown from "@/components/Countdown";
 import RecordingIndicator from "@/components/RecordingIndicator";
 import { AudioRecorder } from "@/lib/audioRecorder";
-import { analyzeAudio } from "@/lib/audioAnalysis";
+import { analyzeAudio, analyzeMeasure } from "@/lib/audioAnalysis";
 import { t } from "@/lib/translations";
 import { MusicPiece } from "@/types";
 import { MIN_TEMPO, MAX_TEMPO } from "@/lib/constants";
@@ -49,6 +49,7 @@ export default function PracticePage() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [hasRecorded, setHasRecorded] = useState(false);
+  const [delayedMeasureFeedback, setDelayedMeasureFeedback] = useState<Map<number, NoteFeedback[]>>(new Map());
 
   useEffect(() => {
     if (!user) {
@@ -144,11 +145,93 @@ export default function PracticePage() {
       setIsRecording(false);
       setRecordedAudio(audioBlob);
       setHasRecorded(true);
+      // Clear delayed feedback when stopping
+      setDelayedMeasureFeedback(new Map());
     } catch (error) {
       console.error("Error stopping recording:", error);
       alert("เกิดข้อผิดพลาดในการหยุดการบันทึก");
       setIsRecording(false);
     }
+  };
+
+  // Set up measure-level feedback monitoring for Practice Mode
+  const setupMeasureLevelFeedback = (recordingStartTime: number) => {
+    if (feedbackMode !== "practice") return;
+
+    const beatsPerMeasure = 4; // Default 4/4 time
+    const secondsPerBeat = 60 / tempo;
+    const secondsPerMeasure = beatsPerMeasure * secondsPerBeat;
+
+    // Mock expected notes (in production, this would come from sheet music analysis)
+    const expectedNotes = [
+      { bar: 1, noteIndex: 0, note: "C4", time: 0.5 },
+      { bar: 1, noteIndex: 1, note: "C4", time: 1.0 },
+      { bar: 1, noteIndex: 2, note: "G4", time: 1.5 },
+      { bar: 1, noteIndex: 3, note: "G4", time: 2.0 },
+      { bar: 2, noteIndex: 0, note: "A4", time: 2.5 },
+      { bar: 2, noteIndex: 1, note: "A4", time: 3.0 },
+      { bar: 2, noteIndex: 2, note: "G4", time: 3.5 },
+      { bar: 3, noteIndex: 0, note: "F4", time: 4.0 },
+      { bar: 3, noteIndex: 1, note: "F4", time: 4.5 },
+      { bar: 3, noteIndex: 2, note: "E4", time: 5.0 },
+    ];
+
+    let currentMeasure = 1;
+    const processedMeasures = new Set<number>();
+
+    const checkMeasureCompletion = async () => {
+      if (!isRecording) return;
+
+      const elapsedSeconds = (Date.now() - recordingStartTime) / 1000;
+      const expectedMeasure = Math.floor(elapsedSeconds / secondsPerMeasure) + 1;
+      const measureStartTime = (expectedMeasure - 1) * secondsPerMeasure;
+      const measureEndTime = measureStartTime + secondsPerMeasure;
+
+      // If we've moved to a new measure and the previous one hasn't been processed
+      if (expectedMeasure > currentMeasure && !processedMeasures.has(currentMeasure - 1)) {
+        const measureToAnalyze = currentMeasure - 1;
+        processedMeasures.add(measureToAnalyze);
+
+        // Wait a small delay after measure ends before analyzing (delayed feedback)
+        setTimeout(async () => {
+          try {
+            const measureStart = (measureToAnalyze - 1) * secondsPerMeasure;
+            const measureEnd = measureStart + secondsPerMeasure;
+            
+            const audioBuffer = await recorder.getAudioBufferForRange(measureStart, measureEnd);
+            if (audioBuffer) {
+              const result = await analyzeMeasure(
+                audioBuffer,
+                measureToAnalyze,
+                measureStart,
+                secondsPerMeasure,
+                expectedNotes
+              );
+
+              if (result && result.feedback.length > 0) {
+                setDelayedMeasureFeedback((prev) => {
+                  const newMap = new Map(prev);
+                  newMap.set(measureToAnalyze, result.feedback);
+                  return newMap;
+                });
+              }
+            }
+          } catch (error) {
+            console.error("Error analyzing measure:", error);
+          }
+        }, 200); // 200ms delay after measure ends
+
+        currentMeasure = expectedMeasure;
+      }
+
+      // Continue checking
+      if (isRecording) {
+        setTimeout(checkMeasureCompletion, 100); // Check every 100ms
+      }
+    };
+
+    // Start checking after first measure
+    setTimeout(checkMeasureCompletion, secondsPerMeasure * 1000 + 200);
   };
 
   const handleAnalyze = async () => {

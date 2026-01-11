@@ -23,6 +23,7 @@ interface SheetMusicViewerProps {
   notationData?: MusicPiece["notationData"]; // Structured notation if available
   feedbackMode?: "calm" | "practice"; // Feedback intensity mode
   selectedPiece?: MusicPiece | null; // Pass selected piece to check if it's a starter song
+  delayedMeasureFeedback?: Map<number, NoteFeedback[]>; // Delayed feedback for completed measures (Practice Mode)
 }
 
 export default function SheetMusicViewer({
@@ -38,6 +39,7 @@ export default function SheetMusicViewer({
   notationData,
   feedbackMode = "calm",
   selectedPiece = null,
+  delayedMeasureFeedback = new Map(),
 }: SheetMusicViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -315,7 +317,7 @@ export default function SheetMusicViewer({
       }
       setLoading(false);
     }
-  }, [fileUrl, zoom, fitToWidth, drawFeedback]);
+  }, [fileUrl, zoom, fitToWidth, drawFeedback, drawDelayedMeasureFeedback, feedbackMode, isRecording, playheadPosition]);
 
   const loadImage = useCallback(async () => {
     if (!fileUrl) {
@@ -364,6 +366,10 @@ export default function SheetMusicViewer({
       // Draw live guidance during recording OR feedback after recording
       if (isRecording && feedback.length === 0) {
         drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition, scale);
+        // In Practice Mode, also draw delayed measure feedback
+        if (feedbackMode === "practice") {
+          drawDelayedMeasureFeedback(context, canvas.width, canvas.height);
+        }
       } else if (feedback.length > 0 && !isRecording) {
         drawFeedback(context, canvas.width, canvas.height);
       }
@@ -384,7 +390,7 @@ export default function SheetMusicViewer({
       setError("RENDER_ERROR");
       setLoading(false);
     }
-  }, [fileUrl, zoom, fitToWidth, drawFeedback, drawLiveGuidance, isRecording, feedback.length, playheadPosition]);
+  }, [fileUrl, zoom, fitToWidth, drawFeedback, drawLiveGuidance, drawDelayedMeasureFeedback, isRecording, feedback.length, playheadPosition, feedbackMode, delayedMeasureFeedback]);
 
   useEffect(() => {
     if (!fileUrl) {
@@ -473,6 +479,10 @@ export default function SheetMusicViewer({
         // Overlay live guidance with proper scale (only during recording)
         if (isRecording && feedback.length === 0) {
           drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition, currentScale);
+          // In Practice Mode, also draw delayed measure feedback
+          if (feedbackMode === "practice") {
+            drawDelayedMeasureFeedback(context, canvas.width, canvas.height);
+          }
         } else if (feedback.length > 0 && !isRecording) {
           drawFeedback(context, canvas.width, canvas.height);
         }
@@ -488,6 +498,10 @@ export default function SheetMusicViewer({
         // Overlay live guidance with proper scale (only during recording)
         if (isRecording && feedback.length === 0) {
           drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition, imageScale);
+          // In Practice Mode, also draw delayed measure feedback
+          if (feedbackMode === "practice") {
+            drawDelayedMeasureFeedback(context, canvas.width, canvas.height);
+          }
         } else if (feedback.length > 0 && !isRecording) {
           drawFeedback(context, canvas.width, canvas.height);
         }
@@ -495,7 +509,7 @@ export default function SheetMusicViewer({
     };
 
     redraw();
-  }, [playheadPosition, isRecording, feedback.length, loading, fileType, drawLiveGuidance, drawFeedback]);
+  }, [playheadPosition, isRecording, feedback.length, loading, fileType, drawLiveGuidance, drawFeedback, drawDelayedMeasureFeedback, feedbackMode, delayedMeasureFeedback]);
   
   // Auto-scroll based on tempo and elapsed time - Rhythm-aware
   useEffect(() => {
