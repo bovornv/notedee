@@ -766,7 +766,8 @@ export default function SheetMusicViewer({
     redraw();
   }, [playheadPosition, isRecording, feedback.length, loading, fileType, drawLiveGuidance, drawFeedback, drawMeasureBoundaries, feedbackMode, notationData, tempo]);
   
-  // Auto-scroll based on tempo and elapsed time - Rhythm-aware
+  // Auto-scroll and playhead movement - Beat-synchronized with metronome and time signature
+  // Playhead moves beat-by-beat, auto-scroll triggers when measure completes
   useEffect(() => {
     if (!autoScrollEnabled || !containerRef.current || loading || !recordingStartTime) {
       if (scrollAnimationRef.current) {
@@ -790,8 +791,12 @@ export default function SheetMusicViewer({
     const canvasHeight = canvasHeightRef.current;
     const startTime = recordingStartTime;
     const secondsPerBeat = 60 / tempo;
+    const secondsPerMeasure = beatsPerMeasure * secondsPerBeat;
     
-    // MODE A: Structured Notation (Precise)
+    // Track last completed measure for scroll triggering
+    let lastCompletedMeasure = -1;
+    
+    // MODE A: Structured Notation (Precise) - Use actual measure boundaries
     if (hasStructuredNotation && notationData) {
       const { measures, totalBeats } = notationData;
       
@@ -806,40 +811,48 @@ export default function SheetMusicViewer({
         
         // Find current measure based on beat position
         let currentMeasure = measures[0];
-        for (const measure of measures) {
+        let currentMeasureIndex = 0;
+        for (let i = 0; i < measures.length; i++) {
+          const measure = measures[i];
           if (currentBeat >= measure.startBeat && currentBeat < measure.startBeat + measure.duration) {
             currentMeasure = measure;
+            currentMeasureIndex = i;
             break;
           }
         }
         
-        // Find target system (line) for current measure
-        const targetSystem = currentMeasure.systemIndex;
-        const targetScrollTop = targetSystem * systemHeight;
-        const maxScroll = Math.max(0, canvasHeight - container.clientHeight);
-        
-        // Calculate playhead position based on beat progress
-        const progressInMeasure = (currentBeat - currentMeasure.startBeat) / currentMeasure.duration;
+        // Calculate playhead position based on beat progress within current measure
+        const progressInMeasure = Math.min(1, Math.max(0, (currentBeat - currentMeasure.startBeat) / currentMeasure.duration));
         const overallProgress = currentBeat / totalBeats;
         const playheadPercent = Math.min(100, Math.max(0, overallProgress * 100));
         setPlayheadPosition(playheadPercent);
         
-        // Scroll to target system (with slight lead - scroll early)
-        const leadTime = 0.5; // Scroll 0.5 seconds before measure ends
-        const beatsUntilNextSystem = currentMeasure.duration - progressInMeasure * currentMeasure.duration;
-        if (beatsUntilNextSystem * secondsPerBeat <= leadTime) {
-          // Scroll to next system early
+        // AUTO-SCROLL: Trigger when measure completes (playhead reaches measure end)
+        // Check if we've completed the current measure (progress >= 95%)
+        if (progressInMeasure >= 0.95 && currentMeasureIndex > lastCompletedMeasure) {
+          lastCompletedMeasure = currentMeasureIndex;
+          
+          // Scroll to next system when measure completes
+          const targetSystem = currentMeasure.systemIndex;
           const nextSystemIndex = Math.min(targetSystem + 1, Math.ceil(canvasHeight / systemHeight) - 1);
           const nextSystemScroll = nextSystemIndex * systemHeight;
+          const maxScroll = Math.max(0, canvasHeight - container.clientHeight);
           const smoothScroll = Math.min(nextSystemScroll, maxScroll);
           
+          // Smooth scroll to next system
           const currentScroll = container.scrollTop;
           const scrollDiff = smoothScroll - currentScroll;
-          const scrollStep = scrollDiff * 0.15; // Smooth interpolation
-          container.scrollTop = currentScroll + scrollStep;
-          scrollPositionRef.current = container.scrollTop;
+          if (Math.abs(scrollDiff) > 10) { // Only scroll if significant difference
+            const scrollStep = scrollDiff * 0.2; // Faster scroll when measure completes
+            container.scrollTop = currentScroll + scrollStep;
+            scrollPositionRef.current = container.scrollTop;
+          }
         } else {
-          // Smooth scroll to current system
+          // Smooth scroll to current system during measure
+          const targetSystem = currentMeasure.systemIndex;
+          const targetScrollTop = targetSystem * systemHeight;
+          const maxScroll = Math.max(0, canvasHeight - container.clientHeight);
+          
           const currentScroll = container.scrollTop;
           const scrollDiff = targetScrollTop - currentScroll;
           const scrollStep = scrollDiff * 0.1;
@@ -861,12 +874,12 @@ export default function SheetMusicViewer({
       };
     }
     
-    // MODE B: PDF/Image Upload (Measure-based, Metronome-aligned)
-    // Scroll measure-by-measure, aligned to metronome beats
+    // MODE B: PDF/Image Upload (Measure-based, Beat-synchronized)
+    // Playhead moves beat-by-beat, scroll triggers when measure completes
     const measuresPerSystem = 4; // Typical: 4 measures per system
     const beatsPerSystem = measuresPerSystem * beatsPerMeasure;
-    const secondsPerMeasure = beatsPerMeasure * secondsPerBeat;
-    const secondsPerSystem = beatsPerSystem * secondsPerBeat;
+    
+    let lastCompletedMeasureForScroll = -1;
     
     const animateScroll = () => {
       if (!autoScrollEnabled || !container || !recordingStartTime) {
@@ -876,51 +889,56 @@ export default function SheetMusicViewer({
       const now = Date.now();
       const elapsedSeconds = (now - startTime) / 1000;
       
-      // Calculate current measure and beat within measure
+      // Calculate current beat (beat-by-beat, synchronized with metronome)
       const totalBeatsElapsed = elapsedSeconds / secondsPerBeat;
       const currentMeasure = Math.floor(totalBeatsElapsed / beatsPerMeasure);
       const beatInMeasure = totalBeatsElapsed % beatsPerMeasure;
+      const progressInMeasure = beatInMeasure / beatsPerMeasure;
       
-      // Calculate which system we should be viewing
-      // Scroll to next system slightly early (0.5 seconds before measure ends)
+      // Calculate playhead position based on beat progress (beat-by-beat movement)
       const measuresElapsed = totalBeatsElapsed / beatsPerMeasure;
-      const systemsElapsed = measuresElapsed / measuresPerSystem;
-      
-      // Lead time: scroll to next system 0.5 seconds early
-      const leadBeats = 0.5 / secondsPerBeat;
-      const adjustedSystemsElapsed = (totalBeatsElapsed + leadBeats) / beatsPerSystem;
-      
-      const targetSystem = Math.floor(adjustedSystemsElapsed);
-      const targetScrollTop = targetSystem * systemHeight;
-      const maxScroll = Math.max(0, canvasHeight - container.clientHeight);
-      
-      // Calculate playhead position (left-to-right)
       const totalSystems = Math.ceil(canvasHeight / systemHeight);
-      const progressInSystem = (adjustedSystemsElapsed % 1);
-      const overallProgress = totalSystems > 0 ? (targetSystem + progressInSystem) / totalSystems : 0;
+      const systemsElapsed = measuresElapsed / measuresPerSystem;
+      const progressInSystem = (systemsElapsed % 1);
+      const overallProgress = totalSystems > 0 ? (Math.floor(systemsElapsed) + progressInSystem) / totalSystems : 0;
       const playheadPercent = Math.min(100, Math.max(0, overallProgress * 100));
       setPlayheadPosition(playheadPercent);
       
-      // Track current system for indicator positioning
-      currentSystemRef.current = targetSystem;
-      
-      // Smooth scroll to target position
-      if (targetScrollTop <= maxScroll) {
+      // AUTO-SCROLL: Trigger when measure completes (progressInMeasure >= 95%)
+      // Check if we've completed a measure
+      if (progressInMeasure >= 0.95 && currentMeasure > lastCompletedMeasureForScroll) {
+        lastCompletedMeasureForScroll = currentMeasure;
+        
+        // Calculate target system based on completed measures
+        const targetSystem = Math.floor(measuresElapsed / measuresPerSystem);
+        const targetScrollTop = targetSystem * systemHeight;
+        const maxScroll = Math.max(0, canvasHeight - container.clientHeight);
+        
+        // Smooth scroll to target system when measure completes
         const currentScroll = container.scrollTop;
         const scrollDiff = targetScrollTop - currentScroll;
+        if (Math.abs(scrollDiff) > 10) { // Only scroll if significant difference
+          const scrollStep = scrollDiff * 0.2; // Faster scroll when measure completes
+          const newScrollTop = Math.min(maxScroll, currentScroll + scrollStep);
+          container.scrollTop = newScrollTop;
+          scrollPositionRef.current = newScrollTop;
+        }
+      } else {
+        // Smooth scroll to current system during measure
+        const targetSystem = Math.floor(measuresElapsed / measuresPerSystem);
+        const targetScrollTop = targetSystem * systemHeight;
+        const maxScroll = Math.max(0, canvasHeight - container.clientHeight);
         
-        // Smooth interpolation (easing)
-        const scrollStep = scrollDiff * 0.1; // 10% of difference per frame
-        const newScrollTop = currentScroll + scrollStep;
-        
+        const currentScroll = container.scrollTop;
+        const scrollDiff = targetScrollTop - currentScroll;
+        const scrollStep = scrollDiff * 0.1;
+        const newScrollTop = Math.min(maxScroll, currentScroll + scrollStep);
         container.scrollTop = newScrollTop;
         scrollPositionRef.current = newScrollTop;
-      } else {
-        // Reached end of music
-        container.scrollTop = maxScroll;
-        scrollPositionRef.current = maxScroll;
-        setPlayheadPosition(100);
       }
+      
+      // Track current system for indicator positioning
+      currentSystemRef.current = Math.floor(measuresElapsed / measuresPerSystem);
       
       scrollAnimationRef.current = requestAnimationFrame(animateScroll);
     };
