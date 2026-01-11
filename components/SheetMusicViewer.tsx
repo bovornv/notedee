@@ -464,7 +464,7 @@ export default function SheetMusicViewer({
         
       // Draw live guidance during recording OR feedback after recording
       if (isRecording && feedback.length === 0) {
-        drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition, scale);
+        drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition || 1, scale);
         // In Practice Mode, also draw delayed measure feedback
         if (feedbackMode === "practice") {
           drawDelayedMeasureFeedback(context, canvas.width, canvas.height);
@@ -617,8 +617,16 @@ export default function SheetMusicViewer({
         cancelAnimationFrame(scrollAnimationRef.current);
         scrollAnimationRef.current = null;
       }
-      setPlayheadPosition(0);
+      // Only reset to 0 when not recording, keep position during recording
+      if (!isRecording) {
+        setPlayheadPosition(0);
+      }
       return;
+    }
+    
+    // Initialize playhead position to a small value so indicator is visible immediately
+    if (playheadPosition === 0) {
+      setPlayheadPosition(1); // Start at 1% so indicator is visible
     }
 
     const container = containerRef.current;
