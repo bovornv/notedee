@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Play, Square, Upload, Music, BarChart3, Target, Zap, Clock } from "lucide-react";
+import { Play, Square, Upload, Music, BarChart3, Target, Zap, Clock, RefreshCw } from "lucide-react";
 import { usePracticeStore } from "@/store/practiceStore";
 import { useAuthStore } from "@/store/authStore";
 import { useProgressStore } from "@/store/progressStore";
@@ -371,11 +371,24 @@ export default function PracticePage() {
           <div className="border-b border-border bg-accent px-6 py-4">
             <div className="mx-auto max-w-4xl">
               <div className="flex items-center justify-between mb-3">
-                <h1 className="text-lg font-semibold">
-                  {selectedPiece
-                    ? selectedPiece.title
-                    : t("practice.select_piece")}
-                </h1>
+                <div className="flex items-center gap-3">
+                  <h1 className="text-lg font-semibold">
+                    {selectedPiece
+                      ? selectedPiece.title
+                      : t("practice.select_piece")}
+                  </h1>
+                  {selectedPiece && (
+                    <button
+                      onClick={() => setShowPieceSelector(true)}
+                      disabled={isRecording || countdown !== null}
+                      className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Change song"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      <span>Change Song</span>
+                    </button>
+                  )}
+                </div>
                 <MicIndicator
                   isRecording={isRecording}
                   hasPermission={!micPermissionDenied}
