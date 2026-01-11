@@ -258,9 +258,12 @@ export default function PracticePage() {
           </div>
 
           {/* Practice Settings - Always visible */}
-          <div className="border-b border-border bg-background px-6 py-4 shadow-sm">
+          <div className="border-b-2 border-blue-200 bg-gradient-to-r from-blue-50/50 to-background px-6 py-5 shadow-md">
             <div className="mx-auto max-w-4xl">
-              <h3 className="text-base font-semibold text-foreground mb-4">⚙️ Practice Settings</h3>
+              <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                <span className="text-2xl">⚙️</span>
+                <span>Practice Settings</span>
+              </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Practice Mode */}
                 <div className="space-y-2">
@@ -301,8 +304,8 @@ export default function PracticePage() {
 
                 {/* Live Feedback Mode */}
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-foreground block">Live Feedback Mode</label>
-                  <div className="flex gap-2">
+                  <label className="text-sm font-bold text-blue-700 block">🎯 Live Feedback Mode</label>
+                  <div className="flex gap-3">
                     {[
                       { value: "calm", label: "Calm", description: "Minimal guidance" },
                       { value: "practice", label: "Practice", description: "Delayed measure feedback" },
@@ -313,14 +316,14 @@ export default function PracticePage() {
                           key={mode.value}
                           onClick={() => setFeedbackMode(mode.value as "calm" | "practice")}
                           disabled={isRecording || countdown !== null}
-                          className={`flex flex-col items-start rounded-lg px-4 py-2.5 text-xs font-medium transition-colors border-2 min-w-[120px] ${
+                          className={`flex flex-col items-start rounded-xl px-5 py-3 text-xs font-medium transition-all border-2 min-w-[130px] transform hover:scale-105 ${
                             isActive
-                              ? "bg-blue-600 text-white border-blue-700 shadow-md"
-                              : "bg-accent text-foreground hover:bg-accent/80 border-border"
-                          } disabled:opacity-50`}
+                              ? "bg-blue-600 text-white border-blue-700 shadow-lg ring-2 ring-blue-300"
+                              : "bg-white text-foreground hover:bg-blue-50 border-gray-300 shadow-sm"
+                          } disabled:opacity-50 disabled:hover:scale-100`}
                         >
-                          <span className="font-semibold text-sm">{mode.label}</span>
-                          <span className={`text-[10px] mt-0.5 ${isActive ? "text-blue-100" : "text-muted-foreground"}`}>
+                          <span className="font-bold text-sm">{mode.label}</span>
+                          <span className={`text-[10px] mt-1 ${isActive ? "text-blue-100" : "text-gray-600"}`}>
                             {mode.description}
                           </span>
                         </button>
