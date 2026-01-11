@@ -589,7 +589,7 @@ export default function SheetMusicViewer({
     };
 
     redraw();
-  }, [playheadPosition, isRecording, feedback.length, loading, fileType, drawLiveGuidance, drawFeedback, drawDelayedMeasureFeedback, feedbackMode, delayedMeasureFeedback]);
+  }, [playheadPosition, isRecording, feedback.length, loading, fileType, drawLiveGuidance, drawFeedback, drawDelayedMeasureFeedback, feedbackMode, delayedMeasureFeedback, analyzingMeasures]);
   
   // Auto-scroll based on tempo and elapsed time - Rhythm-aware
   useEffect(() => {
