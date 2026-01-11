@@ -188,15 +188,19 @@ export default function SheetMusicViewer({
     analyzingMeasures.forEach((measureNumber) => {
       if (!delayedMeasureFeedback.has(measureNumber)) {
         const x = (measureNumber - 1) * barWidth;
-        const pulseOpacity = 0.3 + Math.sin(Date.now() / 500) * 0.2; // Subtle pulse animation
+        // Smooth pulse animation (slower, calmer)
+        const pulseOpacity = 0.25 + Math.sin(Date.now() / 800) * 0.15;
         
         context.save();
+        // Subtle gray-blue background with pulse
         context.fillStyle = `rgba(100, 116, 139, ${pulseOpacity})`;
         context.fillRect(x, 0, barWidth, height);
         
-        // Draw "Analyzing..." text
-        context.fillStyle = "rgba(55, 53, 47, 0.6)";
+        // Draw "Analyzing..." text with better positioning
+        context.fillStyle = "rgba(55, 53, 47, 0.7)";
         context.font = "11px sans-serif";
+        context.textAlign = "left";
+        context.textBaseline = "top";
         context.fillText("Analyzing...", x + 8, 20);
         context.restore();
       }
@@ -222,15 +226,22 @@ export default function SheetMusicViewer({
         wrong: "rgba(239, 68, 68, 0.15)", // Softer red - gentle guidance
       };
 
-      // Draw subtle overlay for completed measure
+      // Draw subtle overlay for completed measure with smooth fade-in effect
+      context.save();
+      context.globalAlpha = 0.85; // Slight transparency for smoother appearance
       context.fillStyle = colors[worstAccuracy];
       context.fillRect(x, 0, barWidth, height);
+      context.restore();
 
       // Draw measure number with gentle styling
       if (worstAccuracy !== "correct") {
-        context.fillStyle = "rgba(55, 53, 47, 0.7)";
+        context.save();
+        context.fillStyle = "rgba(55, 53, 47, 0.75)";
         context.font = "12px sans-serif";
+        context.textAlign = "left";
+        context.textBaseline = "top";
         context.fillText(`Measure ${bar}`, x + 8, 20);
+        context.restore();
       }
     });
   }, [feedbackMode, isRecording, delayedMeasureFeedback, analyzingMeasures]);

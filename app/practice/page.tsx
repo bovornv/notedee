@@ -51,6 +51,7 @@ export default function PracticePage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [hasRecorded, setHasRecorded] = useState(false);
   const [delayedMeasureFeedback, setDelayedMeasureFeedback] = useState<Map<number, NoteFeedback[]>>(new Map());
+  const [analyzingMeasures, setAnalyzingMeasures] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     if (!user) {
@@ -80,6 +81,9 @@ export default function PracticePage() {
       setShowPieceSelector(false);
       setHasRecorded(false);
       setRecordedAudio(null);
+      // Clean up delayed feedback when changing pieces
+      setDelayedMeasureFeedback(new Map());
+      setAnalyzingMeasures(new Set());
     } else {
       alert("กรุณาเลือกไฟล์ PDF หรือรูปภาพ");
     }
@@ -267,6 +271,7 @@ export default function PracticePage() {
           } catch (error) {
             console.error("Error analyzing measure:", error);
             // Silently fail - don't interrupt practice flow
+            // But still remove from analyzing set
           } finally {
             setAnalyzingMeasures((prev) => {
               const newSet = new Set(prev);
@@ -472,6 +477,7 @@ export default function PracticePage() {
                 </div>
               </div>
             </div>
+          </div>
 
           {/* Recording Status Message */}
           {isRecording && (

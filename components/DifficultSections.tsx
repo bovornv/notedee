@@ -11,7 +11,6 @@ interface DifficultSectionsProps {
 
 export default function DifficultSections({ feedback, pieceTitle }: DifficultSectionsProps) {
   const router = useRouter();
-  const { setSelectedPiece, selectedPiece } = usePracticeStore();
 
   // Identify difficult measures (measures with wrong or mostly wrong notes)
   const measureAccuracy: { [bar: number]: { correct: number; total: number } } = {};

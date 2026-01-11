@@ -35,6 +35,7 @@ function extractNotesFromNotationData(
   const { measures, timeSignature, totalBeats } = notationData;
   const secondsPerBeat = 60 / tempo;
   const beatsPerMeasure = timeSignature.numerator;
+  const beatValue = timeSignature.denominator; // e.g., 4 for quarter note, 8 for eighth note
   
   const expectedNotes: Array<{ bar: number; noteIndex: number; note: string; time: number }> = [];
   const measuresToProcess = maxMeasures ? measures.slice(0, maxMeasures) : measures;
@@ -46,8 +47,10 @@ function extractNotesFromNotationData(
     const measureDuration = measure.duration;
 
     // Generate notes at regular intervals within the measure
+    // Adjust note density based on time signature (e.g., 6/8 has more subdivisions)
     // In production, this would come from actual note data in the measure
-    const notesPerMeasure = Math.max(2, Math.floor(beatsPerMeasure / 0.5)); // At least 2 notes per measure
+    const baseSubdivision = beatValue === 8 ? 0.25 : 0.5; // More notes for 8th-note time signatures
+    const notesPerMeasure = Math.max(2, Math.floor(beatsPerMeasure / baseSubdivision));
     const beatInterval = measureDuration / notesPerMeasure;
 
     for (let i = 0; i < notesPerMeasure; i++) {
