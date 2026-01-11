@@ -436,148 +436,123 @@ export default function PracticePage() {
       <RecordingIndicator isRecording={isRecording} />
       <div className="flex-1 overflow-hidden">
         <div className="flex h-full flex-col">
-          {/* Header with Daily Goal */}
-          <div className="border-b border-border bg-accent px-6 py-4">
-            <div className="mx-auto max-w-4xl">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <h1 className="text-lg font-semibold">
-                    {selectedPiece
-                      ? selectedPiece.title
-                      : t("practice.select_piece")}
-                  </h1>
-                  {selectedPiece && (
-                    <button
-                      onClick={() => setShowPieceSelector(true)}
-                      disabled={isRecording || countdown !== null}
-                      className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
-                      title="Change song"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      <span>Change Song</span>
-                    </button>
-                  )}
-                </div>
+          {/* Compact Header - Single Row */}
+          <div className="border-b border-border bg-accent px-4 py-1.5">
+            <div className="mx-auto max-w-4xl flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <h1 className="text-sm font-semibold truncate">
+                  {selectedPiece
+                    ? selectedPiece.title
+                    : t("practice.select_piece")}
+                </h1>
+                {selectedPiece && (
+                  <button
+                    onClick={() => setShowPieceSelector(true)}
+                    disabled={isRecording || countdown !== null}
+                    className="flex items-center gap-1 rounded border border-border bg-background px-2 py-0.5 text-[10px] font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                    title="Change song"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    <span>Change</span>
+                  </button>
+                )}
+              </div>
+              
+              {/* Compact Daily Goal - Inline */}
+              <div className="flex items-center gap-2 shrink-0">
+                <Target className="h-3 w-3 text-blue-600" />
+                <span className="text-[10px] text-muted-foreground">
+                  {dailyGoal.targetAccuracy}%
+                </span>
+                <div className="h-2.5 w-px bg-border" />
+                <Clock className="h-3 w-3 text-purple-600" />
+                <span className="text-[10px] text-muted-foreground">
+                  {todaySessions}/{dailyGoal.targetSessions}
+                </span>
+              </div>
+              
+              <div className="shrink-0">
                 <MicIndicator
                   isRecording={isRecording}
                   hasPermission={!micPermissionDenied}
                 />
               </div>
-              
-              {/* Daily Goal Display */}
-              <div className="flex items-center gap-4 rounded-lg bg-background/50 p-3">
-                <div className="flex items-center gap-2">
-                  <Target className="h-4 w-4 text-blue-600" />
-                  <span className="text-xs font-medium text-foreground">Today&apos;s Goal:</span>
-                  <span className="text-xs text-muted-foreground">
-                    {dailyGoal.targetAccuracy}% accuracy
-                  </span>
+            </div>
+          </div>
+
+          {/* Compact Practice Settings - Single Horizontal Row */}
+          <div className="border-b-2 border-blue-200 bg-gradient-to-r from-blue-50/50 to-background px-4 py-1.5">
+            <div className="mx-auto max-w-4xl flex items-center gap-4 flex-wrap">
+              {/* Practice Mode */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-medium text-muted-foreground shrink-0">Mode:</span>
+                <div className="flex gap-1">
+                  {[
+                    { value: "normal", label: "Normal", icon: Music },
+                    { value: "accuracy", label: "Accuracy", icon: Target },
+                    { value: "rhythm", label: "Rhythm", icon: Zap },
+                  ].map((mode) => {
+                    const Icon = mode.icon;
+                    const isActive = practiceMode === mode.value;
+                    return (
+                      <button
+                        key={mode.value}
+                        onClick={() => setPracticeMode(mode.value as "normal" | "accuracy" | "rhythm")}
+                        disabled={isRecording || countdown !== null}
+                        className={`flex items-center gap-1 rounded px-2 py-1 text-[10px] font-medium transition-colors ${
+                          isActive
+                            ? "bg-foreground text-background"
+                            : "bg-accent text-foreground hover:bg-accent/80"
+                        } disabled:opacity-50`}
+                        title={mode.label}
+                      >
+                        <Icon className="h-3 w-3" />
+                        <span className="hidden sm:inline">{mode.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
-                <div className="h-3 w-px bg-border" />
-                <div className="flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-purple-600" />
-                  <span className="text-xs text-muted-foreground">
-                    {todaySessions}/{dailyGoal.targetSessions} sessions
-                  </span>
+              </div>
+
+              {/* Divider */}
+              <div className="h-4 w-px bg-border" />
+
+              {/* Live Feedback Mode */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-medium text-blue-700 shrink-0">Feedback:</span>
+                <div className="flex gap-1">
+                  {[
+                    { value: "calm", label: "Calm" },
+                    { value: "practice", label: "Practice" },
+                  ].map((mode) => {
+                    const isActive = feedbackMode === mode.value;
+                    return (
+                      <button
+                        key={mode.value}
+                        onClick={() => setFeedbackMode(mode.value as "calm" | "practice")}
+                        disabled={isRecording || countdown !== null}
+                        className={`rounded px-2.5 py-1 text-[10px] font-medium transition-colors border ${
+                          isActive
+                            ? "bg-blue-600 text-white border-blue-700"
+                            : "bg-white text-foreground hover:bg-blue-50 border-gray-300"
+                        } disabled:opacity-50`}
+                        title={mode.value === "calm" ? "Minimal guidance" : "Delayed measure feedback"}
+                      >
+                        {mode.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Practice Settings - Always visible */}
-          <div className="border-b-2 border-blue-200 bg-gradient-to-r from-blue-50/50 to-background px-6 py-5 shadow-md">
-            <div className="mx-auto max-w-4xl">
-              <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-                <span className="text-2xl">⚙️</span>
-                <span>Practice Settings</span>
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Practice Mode */}
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-foreground block">Practice Mode</label>
-                  <div className="flex gap-2 flex-wrap">
-                    {[
-                      { value: "normal", label: "Normal", icon: Music },
-                      { value: "accuracy", label: "Accuracy", icon: Target },
-                      { value: "rhythm", label: "Rhythm", icon: Zap },
-                    ].map((mode) => {
-                      const Icon = mode.icon;
-                      const isActive = practiceMode === mode.value;
-                      return (
-                        <button
-                          key={mode.value}
-                          onClick={() => setPracticeMode(mode.value as "normal" | "accuracy" | "rhythm")}
-                          disabled={isRecording || countdown !== null}
-                          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                            isActive
-                              ? "bg-foreground text-background shadow-md"
-                              : "bg-accent text-foreground hover:bg-accent/80"
-                          } disabled:opacity-50`}
-                        >
-                          <Icon className="h-4 w-4" />
-                          {mode.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {practiceMode !== "normal" && (
-                    <p className="text-xs text-muted-foreground mt-2">
-                      {practiceMode === "accuracy"
-                        ? "Focus on hitting the right notes. Speed doesn't matter."
-                        : "Focus on keeping steady rhythm. Use the metronome to help."}
-                    </p>
-                  )}
-                </div>
-
-                {/* Live Feedback Mode */}
-                <div className="space-y-2">
-                  <label className="text-sm font-bold text-blue-700 block">🎯 Live Feedback Mode</label>
-                  <div className="flex gap-3">
-                    {[
-                      { value: "calm", label: "Calm", description: "Minimal guidance" },
-                      { value: "practice", label: "Practice", description: "Delayed measure feedback" },
-                    ].map((mode) => {
-                      const isActive = feedbackMode === mode.value;
-                      return (
-                        <button
-                          key={mode.value}
-                          onClick={() => setFeedbackMode(mode.value as "calm" | "practice")}
-                          disabled={isRecording || countdown !== null}
-                          className={`flex flex-col items-start rounded-xl px-5 py-3 text-xs font-medium transition-all border-2 min-w-[130px] transform hover:scale-105 ${
-                            isActive
-                              ? "bg-blue-600 text-white border-blue-700 shadow-lg ring-2 ring-blue-300"
-                              : "bg-white text-foreground hover:bg-blue-50 border-gray-300 shadow-sm"
-                          } disabled:opacity-50 disabled:hover:scale-100`}
-                        >
-                          <span className="font-bold text-sm">{mode.label}</span>
-                          <span className={`text-[10px] mt-1 ${isActive ? "text-blue-100" : "text-gray-600"}`}>
-                            {mode.description}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {feedbackMode === "calm" && (
-                    <p className="text-xs text-muted-foreground mt-2">
-                      Position tracking only. No correctness feedback during play. Full analysis after you finish.
-                    </p>
-                  )}
-                  {feedbackMode === "practice" && (
-                    <p className="text-xs text-muted-foreground mt-2">
-                      Delayed measure-level feedback. Shows correctness after each measure ends. Still calm and supportive.
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Recording Status Message */}
+          {/* Recording Status Message - Compact */}
           {isRecording && (
-            <div className="border-b border-blue-200 bg-blue-50 px-6 py-2">
+            <div className="border-b border-blue-200 bg-blue-50 px-4 py-1">
               <div className="mx-auto max-w-4xl">
-                <p className="text-xs text-blue-700">
-                  🎵 Playing... The app is listening. Focus on your music, not the screen.
+                <p className="text-[10px] text-blue-700">
+                  🎵 Playing... Focus on your music.
                 </p>
               </div>
             </div>
