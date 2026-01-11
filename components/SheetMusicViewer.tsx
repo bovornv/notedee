@@ -89,8 +89,18 @@ export default function SheetMusicViewer({
       // Estimate: assume 4-5 systems per page
       const estimatedSystems = 4.5;
       systemHeightRef.current = canvasHeight / estimatedSystems;
+      
+      // Mark layout as stable after a short delay (prevents race conditions)
+      layoutStableRef.current = false;
+      const stabilityTimer = setTimeout(() => {
+        layoutStableRef.current = true;
+      }, 150);
+      
+      return () => clearTimeout(stabilityTimer);
+    } else {
+      layoutStableRef.current = false;
     }
-  }, [loading, canvasRef.current?.height]);
+  }, [loading, canvasRef.current?.height, zoom, fitToWidth]);
 
   // Initialize expected notes when piece or notation data changes
   useEffect(() => {
