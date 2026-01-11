@@ -66,6 +66,7 @@ export default function SheetMusicViewer({
   const currentScaleRef = useRef<number>(2.0); // Track current canvas scale for note sizing
   const currentSystemRef = useRef<number>(0); // Track current system (staff) being played
   const measureTimestampsRef = useRef<Map<number, number>>(new Map()); // Track when measures were added for fade-in
+  const musicFrameRef = useRef<{ left: number; right: number; top: number; bottom: number } | null>(null); // Track music frame bounds
   
   // Determine scroll mode: Mode A (structured) or Mode B (measure-based)
   const hasStructuredNotation = !!notationData && notationData.measures.length > 0;
@@ -83,10 +84,36 @@ export default function SheetMusicViewer({
     }
   }, [loading, canvasRef.current?.height]);
 
+  // Detect music frame bounds (where actual staff/notes are on the canvas)
+  // Estimates based on typical sheet music layout
+  const detectMusicFrame = useCallback((
+    width: number,
+    height: number
+  ): { left: number; right: number; top: number; bottom: number } => {
+    // Typical sheet music margins:
+    // - Left margin: ~10-15% of width (for clef, key signature, time signature)
+    // - Right margin: ~5-10% of width
+    // - Top margin: ~5-10% of height
+    // - Bottom margin: ~5-10% of height
+    
+    const leftMargin = width * 0.12; // 12% left margin
+    const rightMargin = width * 0.08; // 8% right margin
+    const topMargin = height * 0.08; // 8% top margin
+    const bottomMargin = height * 0.08; // 8% bottom margin
+    
+    return {
+      left: leftMargin,
+      right: width - rightMargin,
+      top: topMargin,
+      bottom: height - bottomMargin,
+    };
+  }, []);
+
   // Draw PURELY POSITIONAL guidance during recording
   // NO correctness evaluation, NO pitch reactions, NO color changes
   // ONLY purpose: Show "This is where you are in the score"
   // Draws a note-sized indicator that matches the visual scale of sheet music notes
+  // Positioned WITHIN the music frame (staff/notes area), not across entire canvas
   const drawLiveGuidance = useCallback((
     context: CanvasRenderingContext2D,
     width: number,
@@ -102,30 +129,42 @@ export default function SheetMusicViewer({
     // Indicator advances based ONLY on tempo and beat timing
     // Single neutral color, low opacity, no animations
     
+    // Detect music frame bounds (where actual notes are)
+    const musicFrame = detectMusicFrame(width, height);
+    musicFrameRef.current = musicFrame; // Store for use in other functions
+    
+    const musicFrameWidth = musicFrame.right - musicFrame.left;
+    
     // Calculate note head size based on sheet music scale
     // Typical note head in printed music: ~3-4mm at 100% zoom
     // Scale with zoom: base size * scale factor
     const baseNoteSize = 3.5; // Base size in pixels at 1x zoom (matches typical note head)
     const noteHeadRadius = Math.max(1.5, (baseNoteSize * scale) / 2); // Radius scales with zoom, min 1.5px
     
-    // Calculate horizontal position (0-100% across canvas width)
-    // Ensure minimum position so indicator is always visible when recording starts
-    const minPosition = currentPosition === 0 && isRecording ? 2 : currentPosition; // Show at 2% if at start
-    const playheadX = Math.max(10, (minPosition / 100) * width); // Minimum 10px from left edge
+    // Calculate horizontal position WITHIN music frame (not entire canvas)
+    // Map 0-100% position to music frame bounds
+    const minPosition = currentPosition === 0 && isRecording ? 1 : currentPosition; // Show at 1% if at start
+    const positionInFrame = Math.max(0, Math.min(100, minPosition)); // Clamp to 0-100%
+    const playheadX = musicFrame.left + (positionInFrame / 100) * musicFrameWidth;
     
-    // Calculate vertical position: approximate staff line positions
-    const systemsPerPage = Math.ceil(height / systemHeightRef.current) || 4;
-    const systemHeight = height / systemsPerPage;
+    // Ensure playhead stays within music frame bounds
+    const clampedPlayheadX = Math.max(musicFrame.left, Math.min(musicFrame.right, playheadX));
+    
+    // Calculate vertical position: approximate staff line positions within music frame
+    const musicFrameHeight = musicFrame.bottom - musicFrame.top;
+    const systemsPerPage = Math.ceil(musicFrameHeight / systemHeightRef.current) || 4;
+    const systemHeight = musicFrameHeight / systemsPerPage;
     
     // Draw indicator on the current active system (where music is being played)
     // Default to first system if not set yet
     const activeSystem = Math.max(0, Math.min(currentSystemRef.current || 0, systemsPerPage - 1));
-    const systemTop = activeSystem * systemHeight;
-    const systemBottom = (activeSystem + 1) * systemHeight;
+    const systemTop = musicFrame.top + (activeSystem * systemHeight);
+    const systemBottom = musicFrame.top + ((activeSystem + 1) * systemHeight);
     const staffCenterY = systemTop + (systemBottom - systemTop) * 0.5; // Middle of system
     
     // Always draw if recording (even if position is 0) - make it visible
-    if (isRecording && playheadX >= 0 && playheadX <= width && staffCenterY >= 0 && staffCenterY <= height) {
+    if (isRecording && clampedPlayheadX >= musicFrame.left && clampedPlayheadX <= musicFrame.right && 
+        staffCenterY >= musicFrame.top && staffCenterY <= musicFrame.bottom) {
       // SINGLE NEUTRAL COLOR - Never changes based on correctness
       // Soft blue-gray, low opacity, no flashing, no pulsing
       // Make it slightly more visible in Calm Mode so users can see it
@@ -148,21 +187,25 @@ export default function SheetMusicViewer({
       
       // Draw note-sized circle indicator - PURELY POSITIONAL
       // This shows "you are here" - nothing more, nothing less
+      // Positioned WITHIN the music frame
       context.beginPath();
-      context.arc(playheadX, staffCenterY, indicatorRadius, 0, Math.PI * 2);
+      context.arc(clampedPlayheadX, staffCenterY, indicatorRadius, 0, Math.PI * 2);
       context.fill();
       
       // Draw subtle vertical guide line - PURELY POSITIONAL
       // Like an editor cursor, not a game marker
+      // Line extends within the music frame only
       context.lineWidth = Math.max(0.5, scale * (feedbackMode === "calm" ? 0.2 : 0.25));
       context.beginPath();
-      context.moveTo(playheadX, staffCenterY - guideLineHeight / 2);
-      context.lineTo(playheadX, staffCenterY + guideLineHeight / 2);
+      const lineTop = Math.max(musicFrame.top, staffCenterY - guideLineHeight / 2);
+      const lineBottom = Math.min(musicFrame.bottom, staffCenterY + guideLineHeight / 2);
+      context.moveTo(clampedPlayheadX, lineTop);
+      context.lineTo(clampedPlayheadX, lineBottom);
       context.stroke();
       
       context.restore();
     }
-  }, [isRecording, feedback.length, feedbackMode]);
+  }, [isRecording, feedback.length, feedbackMode, detectMusicFrame]);
 
   // Draw measure boundary lines ONLY when we have proper structured notation data
   // Hide boundaries for uploaded PDFs/images without parsed notation data
