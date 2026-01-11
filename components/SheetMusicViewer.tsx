@@ -969,7 +969,6 @@ export default function SheetMusicViewer({
       currentNoteIndexRef.current = currentNoteIdx;
 
       // Calculate current measure based on beats elapsed
-      const secondsPerBeat = 60 / tempo;
       const beatsElapsed = elapsedSeconds / secondsPerBeat;
       const currentMeasure = Math.floor(beatsElapsed / beatsPerMeasure);
       const beatInMeasure = beatsElapsed % beatsPerMeasure;
