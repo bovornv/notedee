@@ -209,6 +209,7 @@ export default function SheetMusicViewer({
 
   // Draw measure boundary lines ONLY when we have proper structured notation data
   // Hide boundaries for uploaded PDFs/images without parsed notation data
+  // Boundaries are drawn WITHIN the music frame (staff/notes area)
   const drawMeasureBoundaries = useCallback((
     context: CanvasRenderingContext2D,
     width: number,
@@ -227,47 +228,52 @@ export default function SheetMusicViewer({
     
     if (!hasValidBeatData) return; // Don't show boundaries for placeholder data
     
+    // Get music frame bounds (where actual notes are)
+    const musicFrame = musicFrameRef.current || detectMusicFrame(width, height);
+    const musicFrameWidth = musicFrame.right - musicFrame.left;
+    
     // Calculate measure boundaries based on tempo
     const secondsPerBeat = 60 / tempo;
     const totalBeats = notationData.totalBeats || notationData.measures.reduce((sum, m) => sum + m.duration, 0);
     
-    // Draw subtle vertical lines for each measure boundary
+    // Draw subtle vertical lines for each measure boundary WITHIN music frame
     notationData.measures.forEach((measure, index) => {
       // Calculate horizontal position based on beat position
       const measureStartBeat = measure.startBeat;
       
-      // Convert beat positions to canvas X positions (0-100% of width)
+      // Convert beat positions to position within music frame (0-100% of music frame width)
       const startXPercent = (measureStartBeat / totalBeats) * 100;
-      const startX = (startXPercent / 100) * width;
+      const startX = musicFrame.left + (startXPercent / 100) * musicFrameWidth;
       
-      // Only draw if position is valid and within canvas bounds
-      if (startX < 0 || startX > width) return;
+      // Only draw if position is valid and within music frame bounds
+      if (startX < musicFrame.left || startX > musicFrame.right) return;
       
-      // Draw measure start line (subtle, like a staff line)
+      // Draw measure start line (subtle, like a staff line) WITHIN music frame
       if (index > 0) { // Don't draw line at the very start
         context.save();
         context.strokeStyle = "rgba(200, 200, 200, 0.3)"; // Very subtle gray
         context.lineWidth = Math.max(0.5, scale * 0.3); // Thin line, scales with zoom
         context.setLineDash([2, 2]); // Dashed line for subtlety
         context.beginPath();
-        context.moveTo(startX, 0);
-        context.lineTo(startX, height);
+        context.moveTo(startX, musicFrame.top);
+        context.lineTo(startX, musicFrame.bottom);
         context.stroke();
         context.restore();
       }
       
       // Only draw measure numbers for first few measures and only if we have valid data
+      // Position numbers within music frame
       if (index < 8 && hasValidBeatData) {
         context.save();
         context.fillStyle = "rgba(150, 150, 150, 0.4)";
         context.font = `${Math.max(8, 10 * scale)}px sans-serif`;
         context.textAlign = "left";
         context.textBaseline = "top";
-        context.fillText(`${measure.measureNumber}`, startX + 2, 5);
+        context.fillText(`${measure.measureNumber}`, startX + 2, musicFrame.top + 5);
         context.restore();
       }
     });
-  }, [notationData, tempo]);
+  }, [notationData, tempo, detectMusicFrame]);
 
   // Draw delayed measure-level feedback during recording (Practice Mode only)
   // Shows feedback for completed measures with a delay after measure ends
