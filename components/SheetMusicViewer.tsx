@@ -24,6 +24,7 @@ interface SheetMusicViewerProps {
   feedbackMode?: "calm" | "practice"; // Feedback intensity mode
   selectedPiece?: MusicPiece | null; // Pass selected piece to check if it's a starter song
   delayedMeasureFeedback?: Map<number, NoteFeedback[]>; // Delayed feedback for completed measures (Practice Mode)
+  analyzingMeasures?: Set<number>; // Measures currently being analyzed (for loading indicator)
 }
 
 export default function SheetMusicViewer({
@@ -40,6 +41,7 @@ export default function SheetMusicViewer({
   feedbackMode = "calm",
   selectedPiece = null,
   delayedMeasureFeedback = new Map(),
+  analyzingMeasures = new Set(),
 }: SheetMusicViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -163,7 +165,7 @@ export default function SheetMusicViewer({
     height: number
   ) => {
     // Only show in Practice Mode during recording
-    if (feedbackMode !== "practice" || !isRecording || delayedMeasureFeedback.size === 0) return;
+    if (feedbackMode !== "practice" || !isRecording) return;
 
     // Group delayed feedback by bar
     const feedbackByBar: Record<number, NoteFeedback[]> = {};
@@ -174,11 +176,35 @@ export default function SheetMusicViewer({
       });
     });
 
+    // Calculate total measures (use max of feedback bars or analyzing measures)
+    const allMeasures = new Set([
+      ...Object.keys(feedbackByBar).map(Number),
+      ...Array.from(analyzingMeasures),
+    ]);
+    const totalBars = Math.max(allMeasures.size, 1);
+    const barWidth = width / totalBars;
+
+    // Draw loading indicator for measures being analyzed
+    analyzingMeasures.forEach((measureNumber) => {
+      if (!delayedMeasureFeedback.has(measureNumber)) {
+        const x = (measureNumber - 1) * barWidth;
+        const pulseOpacity = 0.3 + Math.sin(Date.now() / 500) * 0.2; // Subtle pulse animation
+        
+        context.save();
+        context.fillStyle = `rgba(100, 116, 139, ${pulseOpacity})`;
+        context.fillRect(x, 0, barWidth, height);
+        
+        // Draw "Analyzing..." text
+        context.fillStyle = "rgba(55, 53, 47, 0.6)";
+        context.font = "11px sans-serif";
+        context.fillText("Analyzing...", x + 8, 20);
+        context.restore();
+      }
+    });
+
     // Draw colored overlays for completed measures
     Object.entries(feedbackByBar).forEach(([barStr, notes]) => {
       const bar = parseInt(barStr);
-      const totalBars = Math.max(Object.keys(feedbackByBar).length, 1);
-      const barWidth = width / totalBars;
       const x = (bar - 1) * barWidth;
 
       // Determine bar color based on worst accuracy in bar
@@ -207,7 +233,7 @@ export default function SheetMusicViewer({
         context.fillText(`Measure ${bar}`, x + 8, 20);
       }
     });
-  }, [feedbackMode, isRecording, delayedMeasureFeedback]);
+  }, [feedbackMode, isRecording, delayedMeasureFeedback, analyzingMeasures]);
 
   // Draw detailed feedback after performance (post-performance analysis)
   // This is where learning and correction happen - after the student finishes playing

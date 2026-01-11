@@ -13,6 +13,7 @@ import Countdown from "@/components/Countdown";
 import RecordingIndicator from "@/components/RecordingIndicator";
 import { AudioRecorder } from "@/lib/audioRecorder";
 import { analyzeAudio, analyzeMeasure } from "@/lib/audioAnalysis";
+import { extractExpectedNotes, calculateMeasureBoundaries } from "@/lib/notationParser";
 import { t } from "@/lib/translations";
 import { MusicPiece } from "@/types";
 import { MIN_TEMPO, MAX_TEMPO } from "@/lib/constants";
@@ -156,7 +157,13 @@ export default function PracticePage() {
 
   // Set up measure-level feedback monitoring for Practice Mode
   useEffect(() => {
-    if (!isRecording || feedbackMode !== "practice" || !recordingStartTime || !selectedPiece) return;
+    if (!isRecording || feedbackMode !== "practice" || !recordingStartTime || !selectedPiece) {
+      setAnalyzingMeasures(new Set());
+      return;
+    }
+
+    // Extract expected notes from notation data or use defaults
+    const expectedNotes = extractExpectedNotes(selectedPiece, tempo, 20); // Get up to 20 measures
 
     // Use actual time signature from piece or default to 4/4
     const actualTimeSignature = selectedPiece.notationData?.timeSignature || { numerator: 4, denominator: 4 };
@@ -164,25 +171,15 @@ export default function PracticePage() {
     const secondsPerBeat = 60 / tempo;
     const secondsPerMeasure = beatsPerMeasure * secondsPerBeat;
 
-    // Mock expected notes (in production, this would come from sheet music analysis)
-    // For now, use a simple pattern that matches common practice pieces
-    const expectedNotes = [
-      { bar: 1, noteIndex: 0, note: "C4", time: 0.5 },
-      { bar: 1, noteIndex: 1, note: "C4", time: 1.0 },
-      { bar: 1, noteIndex: 2, note: "G4", time: 1.5 },
-      { bar: 1, noteIndex: 3, note: "G4", time: 2.0 },
-      { bar: 2, noteIndex: 0, note: "A4", time: 2.5 },
-      { bar: 2, noteIndex: 1, note: "A4", time: 3.0 },
-      { bar: 2, noteIndex: 2, note: "G4", time: 3.5 },
-      { bar: 3, noteIndex: 0, note: "F4", time: 4.0 },
-      { bar: 3, noteIndex: 1, note: "F4", time: 4.5 },
-      { bar: 3, noteIndex: 2, note: "E4", time: 5.0 },
-    ];
+    // If we have notation data with measure boundaries, use precise timing
+    const measureBoundaries = selectedPiece.notationData
+      ? calculateMeasureBoundaries(selectedPiece.notationData, tempo)
+      : null;
 
     let currentMeasure = 1;
     const processedMeasures = new Set<number>();
-    const analyzingMeasures = new Set<number>(); // Track measures currently being analyzed
     let intervalId: NodeJS.Timeout | null = null;
+    let lastCheckTime = Date.now();
 
     const checkMeasureCompletion = async () => {
       if (!isRecording) {
@@ -190,28 +187,72 @@ export default function PracticePage() {
         return;
       }
 
-      const elapsedSeconds = (Date.now() - recordingStartTime) / 1000;
-      const expectedMeasure = Math.floor(elapsedSeconds / secondsPerMeasure) + 1;
+      const now = Date.now();
+      const elapsedSeconds = (now - recordingStartTime) / 1000;
+
+      // Use precise measure boundaries if available, otherwise estimate
+      let expectedMeasure: number;
+      let measureStart: number;
+      let measureEnd: number;
+
+      if (measureBoundaries && measureBoundaries.length > 0) {
+        // Find current measure using precise boundaries
+        const currentBoundary = measureBoundaries.find(
+          (boundary) => elapsedSeconds >= boundary.startTime && elapsedSeconds < boundary.endTime
+        );
+        
+        if (currentBoundary) {
+          expectedMeasure = currentBoundary.measureNumber;
+          measureStart = currentBoundary.startTime;
+          measureEnd = currentBoundary.endTime;
+        } else {
+          // Fallback to estimation
+          expectedMeasure = Math.floor(elapsedSeconds / secondsPerMeasure) + 1;
+          measureStart = (expectedMeasure - 1) * secondsPerMeasure;
+          measureEnd = measureStart + secondsPerMeasure;
+        }
+      } else {
+        // Estimate measure boundaries based on tempo
+        expectedMeasure = Math.floor(elapsedSeconds / secondsPerMeasure) + 1;
+        measureStart = (expectedMeasure - 1) * secondsPerMeasure;
+        measureEnd = measureStart + secondsPerMeasure;
+      }
 
       // If we've moved to a new measure and the previous one hasn't been processed
-      if (expectedMeasure > currentMeasure && !processedMeasures.has(currentMeasure - 1) && !analyzingMeasures.has(currentMeasure - 1)) {
+      if (expectedMeasure > currentMeasure && !processedMeasures.has(currentMeasure - 1)) {
         const measureToAnalyze = currentMeasure - 1;
         processedMeasures.add(measureToAnalyze);
-        analyzingMeasures.add(measureToAnalyze);
+        
+        // Update analyzing state
+        setAnalyzingMeasures((prev) => {
+          const newSet = new Set(prev);
+          newSet.add(measureToAnalyze);
+          return newSet;
+        });
+
+        // Calculate actual measure boundaries for the measure being analyzed
+        let actualMeasureStart: number;
+        let actualMeasureEnd: number;
+
+        if (measureBoundaries && measureBoundaries[measureToAnalyze - 1]) {
+          const boundary = measureBoundaries[measureToAnalyze - 1];
+          actualMeasureStart = boundary.startTime;
+          actualMeasureEnd = boundary.endTime;
+        } else {
+          actualMeasureStart = (measureToAnalyze - 1) * secondsPerMeasure;
+          actualMeasureEnd = actualMeasureStart + secondsPerMeasure;
+        }
 
         // Wait a small delay after measure ends before analyzing (delayed feedback)
         setTimeout(async () => {
           try {
-            const measureStart = (measureToAnalyze - 1) * secondsPerMeasure;
-            const measureEnd = measureStart + secondsPerMeasure;
-            
-            const audioBuffer = await recorder.getAudioBufferForRange(measureStart, measureEnd);
+            const audioBuffer = await recorder.getAudioBufferForRange(actualMeasureStart, actualMeasureEnd);
             if (audioBuffer && audioBuffer.length > 0) {
               const result = await analyzeMeasure(
                 audioBuffer,
                 measureToAnalyze,
-                measureStart,
-                secondsPerMeasure,
+                actualMeasureStart,
+                actualMeasureEnd - actualMeasureStart,
                 expectedNotes
               );
 
@@ -227,19 +268,26 @@ export default function PracticePage() {
             console.error("Error analyzing measure:", error);
             // Silently fail - don't interrupt practice flow
           } finally {
-            analyzingMeasures.delete(measureToAnalyze);
+            setAnalyzingMeasures((prev) => {
+              const newSet = new Set(prev);
+              newSet.delete(measureToAnalyze);
+              return newSet;
+            });
           }
         }, 200); // 200ms delay after measure ends
 
         currentMeasure = expectedMeasure;
       }
+
+      lastCheckTime = now;
     };
 
-    // Start checking after first measure completes
-    intervalId = setInterval(checkMeasureCompletion, 100); // Check every 100ms
+    // Debounce: Check every 100ms (reduced from immediate checks)
+    intervalId = setInterval(checkMeasureCompletion, 100);
 
     return () => {
       if (intervalId) clearInterval(intervalId);
+      setAnalyzingMeasures(new Set());
     };
   }, [isRecording, feedbackMode, recordingStartTime, tempo, recorder, selectedPiece]);
 
@@ -254,19 +302,8 @@ export default function PracticePage() {
     try {
       const audioBuffer = await recorder.getAudioBuffer(recordedAudio);
 
-      // Mock expected notes (in production, this would come from sheet music analysis)
-      const expectedNotes = [
-        { bar: 1, noteIndex: 0, note: "C4", time: 0.5 },
-        { bar: 1, noteIndex: 1, note: "C4", time: 1.0 },
-        { bar: 1, noteIndex: 2, note: "G4", time: 1.5 },
-        { bar: 1, noteIndex: 3, note: "G4", time: 2.0 },
-        { bar: 2, noteIndex: 0, note: "A4", time: 2.5 },
-        { bar: 2, noteIndex: 1, note: "A4", time: 3.0 },
-        { bar: 2, noteIndex: 2, note: "G4", time: 3.5 },
-        { bar: 3, noteIndex: 0, note: "F4", time: 4.0 },
-        { bar: 3, noteIndex: 1, note: "F4", time: 4.5 },
-        { bar: 3, noteIndex: 2, note: "E4", time: 5.0 },
-      ];
+      // Extract expected notes from notation data or use defaults
+      const expectedNotes = extractExpectedNotes(selectedPiece, tempo);
 
       const result = await analyzeAudio(audioBuffer, expectedNotes);
       setFeedback(result.feedback);
@@ -457,6 +494,7 @@ export default function PracticePage() {
                 recordingStartTime={recordingStartTime}
                 feedbackMode={feedbackMode}
                 delayedMeasureFeedback={delayedMeasureFeedback}
+                analyzingMeasures={analyzingMeasures}
                 tempo={tempo}
                 timeSignature={selectedPiece.notationData?.timeSignature || { numerator: 4, denominator: 4 }}
                 notationData={selectedPiece.notationData}

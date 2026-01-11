@@ -6,6 +6,7 @@ export class AudioRecorder {
   private analyserNode: AnalyserNode | null = null;
   private dataArray: Float32Array | null = null;
   private onAudioChunkCallback: ((audioBuffer: AudioBuffer) => void) | null = null;
+  private cachedAudioContext: AudioContext | null = null; // Cache for measure analysis
 
   async start(onAudioChunk?: (audioBuffer: AudioBuffer) => void): Promise<void> {
     try {
@@ -65,21 +66,24 @@ export class AudioRecorder {
   }
 
   // Get audio buffer for a specific time range (for measure-level analysis)
+  // Uses cached AudioContext for better performance
   async getAudioBufferForRange(startTime: number, endTime: number): Promise<AudioBuffer | null> {
     try {
       // Get all chunks recorded so far
       const allChunks = [...this.audioChunks];
       if (allChunks.length === 0) return null;
 
-      // Create a new AudioContext to decode the recorded chunks
-      const tempContext = new AudioContext({ sampleRate: 44100 });
+      // Use cached AudioContext or create new one
+      if (!this.cachedAudioContext || this.cachedAudioContext.state === "closed") {
+        this.cachedAudioContext = new AudioContext({ sampleRate: 44100 });
+      }
       
       const audioBlob = new Blob(allChunks, {
         type: this.mediaRecorder?.mimeType || "audio/webm",
       });
 
       const arrayBuffer = await audioBlob.arrayBuffer();
-      const fullBuffer = await tempContext.decodeAudioData(arrayBuffer);
+      const fullBuffer = await this.cachedAudioContext.decodeAudioData(arrayBuffer);
 
       // Extract the time range
       const startSample = Math.floor(startTime * fullBuffer.sampleRate);
@@ -87,7 +91,6 @@ export class AudioRecorder {
       const length = endSample - startSample;
 
       if (length <= 0 || startSample >= fullBuffer.length || startSample < 0) {
-        tempContext.close();
         return null;
       }
 
@@ -95,14 +98,13 @@ export class AudioRecorder {
       const extractedData = channelData.slice(startSample, Math.min(endSample, channelData.length));
 
       // Create new AudioBuffer with extracted data
-      const newBuffer = tempContext.createBuffer(
+      const newBuffer = this.cachedAudioContext.createBuffer(
         1,
         extractedData.length,
         fullBuffer.sampleRate
       );
       newBuffer.copyToChannel(extractedData, 0);
 
-      tempContext.close();
       return newBuffer;
     } catch (error) {
       console.error("Error extracting audio range:", error);
@@ -141,6 +143,10 @@ export class AudioRecorder {
     if (this.audioContext) {
       this.audioContext.close();
       this.audioContext = null;
+    }
+    if (this.cachedAudioContext) {
+      this.cachedAudioContext.close();
+      this.cachedAudioContext = null;
     }
     this.analyserNode = null;
     this.dataArray = null;
