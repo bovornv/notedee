@@ -164,6 +164,61 @@ export default function SheetMusicViewer({
     }
   }, [isRecording, feedback.length, feedbackMode]);
 
+  // Draw measure boundary lines when notationData is available
+  // Subtle vertical lines showing where measures begin/end
+  const drawMeasureBoundaries = useCallback((
+    context: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    scale: number
+  ) => {
+    // Only show boundaries when we have structured notation data
+    if (!notationData || !notationData.measures.length) return;
+    
+    // Calculate measure boundaries based on tempo
+    const secondsPerBeat = 60 / tempo;
+    const totalBeats = notationData.totalBeats || notationData.measures.reduce((sum, m) => sum + m.duration, 0);
+    const totalDuration = totalBeats * secondsPerBeat;
+    
+    // Draw subtle vertical lines for each measure boundary
+    notationData.measures.forEach((measure, index) => {
+      // Calculate horizontal position based on beat position
+      const measureStartBeat = measure.startBeat;
+      const measureEndBeat = measure.startBeat + measure.duration;
+      
+      // Convert beat positions to canvas X positions (0-100% of width)
+      const startXPercent = (measureStartBeat / totalBeats) * 100;
+      const endXPercent = (measureEndBeat / totalBeats) * 100;
+      
+      const startX = (startXPercent / 100) * width;
+      const endX = (endXPercent / 100) * width;
+      
+      // Draw measure start line (subtle, like a staff line)
+      if (index > 0) { // Don't draw line at the very start
+        context.save();
+        context.strokeStyle = "rgba(200, 200, 200, 0.3)"; // Very subtle gray
+        context.lineWidth = Math.max(0.5, scale * 0.3); // Thin line, scales with zoom
+        context.setLineDash([2, 2]); // Dashed line for subtlety
+        context.beginPath();
+        context.moveTo(startX, 0);
+        context.lineTo(startX, height);
+        context.stroke();
+        context.restore();
+      }
+      
+      // Optionally draw measure number above the line (very subtle)
+      if (index < 8) { // Only show first 8 measures to avoid clutter
+        context.save();
+        context.fillStyle = "rgba(150, 150, 150, 0.4)";
+        context.font = `${Math.max(8, 10 * scale)}px sans-serif`;
+        context.textAlign = "left";
+        context.textBaseline = "top";
+        context.fillText(`${measure.measureNumber}`, startX + 2, 5);
+        context.restore();
+      }
+    });
+  }, [notationData, tempo]);
+
   // Draw delayed measure-level feedback during recording (Practice Mode only)
   // Shows feedback for completed measures with a delay after measure ends
   const drawDelayedMeasureFeedback = useCallback((
@@ -450,7 +505,7 @@ export default function SheetMusicViewer({
       }
       setLoading(false);
     }
-  }, [fileUrl, zoom, fitToWidth, drawFeedback, drawDelayedMeasureFeedback, drawLiveGuidance, feedbackMode, isRecording, playheadPosition, feedback.length]);
+  }, [fileUrl, zoom, fitToWidth, drawFeedback, drawDelayedMeasureFeedback, drawLiveGuidance, drawMeasureBoundaries, feedbackMode, isRecording, playheadPosition, feedback.length, notationData, tempo]);
 
   const loadImage = useCallback(async () => {
     if (!fileUrl) {
@@ -606,6 +661,9 @@ export default function SheetMusicViewer({
             viewport: viewport,
           }).promise;
           
+          if (notationData) {
+            drawMeasureBoundaries(context, canvas.width, canvas.height, currentScale);
+          }
           if (isRecording && feedback.length === 0) {
             drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition || 1, currentScale);
             drawDelayedMeasureFeedback(context, canvas.width, canvas.height);
@@ -615,6 +673,9 @@ export default function SheetMusicViewer({
           context.clearRect(0, 0, canvas.width, canvas.height);
           context.drawImage(imageRef.current, 0, 0, canvas.width, canvas.height);
           
+          if (notationData) {
+            drawMeasureBoundaries(context, canvas.width, canvas.height, imageScale);
+          }
           if (isRecording && feedback.length === 0) {
             drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition || 1, imageScale);
             drawDelayedMeasureFeedback(context, canvas.width, canvas.height);
@@ -658,6 +719,11 @@ export default function SheetMusicViewer({
           viewport: viewport,
         }).promise;
         
+        // Draw measure boundaries first (if available)
+        if (notationData) {
+          drawMeasureBoundaries(context, canvas.width, canvas.height, currentScale);
+        }
+        
         // Overlay live guidance with proper scale (only during recording)
         if (isRecording && feedback.length === 0) {
           drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition, currentScale);
@@ -677,6 +743,11 @@ export default function SheetMusicViewer({
         context.clearRect(0, 0, canvas.width, canvas.height);
         context.drawImage(imageRef.current, 0, 0, canvas.width, canvas.height);
         
+        // Draw measure boundaries first (if available)
+        if (notationData) {
+          drawMeasureBoundaries(context, canvas.width, canvas.height, imageScale);
+        }
+        
         // Overlay live guidance with proper scale (only during recording)
         if (isRecording && feedback.length === 0) {
           drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition, imageScale);
@@ -691,7 +762,7 @@ export default function SheetMusicViewer({
     };
 
     redraw();
-  }, [playheadPosition, isRecording, feedback.length, loading, fileType, drawLiveGuidance, drawFeedback, drawDelayedMeasureFeedback, feedbackMode, delayedMeasureFeedback, analyzingMeasures]);
+  }, [playheadPosition, isRecording, feedback.length, loading, fileType, drawLiveGuidance, drawFeedback, drawDelayedMeasureFeedback, drawMeasureBoundaries, feedbackMode, delayedMeasureFeedback, analyzingMeasures, notationData, tempo]);
   
   // Auto-scroll based on tempo and elapsed time - Rhythm-aware
   useEffect(() => {
