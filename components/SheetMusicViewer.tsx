@@ -65,6 +65,7 @@ export default function SheetMusicViewer({
   const [playheadPosition, setPlayheadPosition] = useState<number>(0); // 0-100% across canvas width
   const currentScaleRef = useRef<number>(2.0); // Track current canvas scale for note sizing
   const currentSystemRef = useRef<number>(0); // Track current system (staff) being played
+  const measureTimestampsRef = useRef<Map<number, number>>(new Map()); // Track when measures were added for fade-in
   
   // Determine scroll mode: Mode A (structured) or Mode B (measure-based)
   const hasStructuredNotation = !!notationData && notationData.measures.length > 0;
