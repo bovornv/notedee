@@ -164,34 +164,41 @@ export default function SheetMusicViewer({
     }
   }, [isRecording, feedback.length, feedbackMode]);
 
-  // Draw measure boundary lines when notationData is available
-  // Subtle vertical lines showing where measures begin/end
+  // Draw measure boundary lines ONLY when we have proper structured notation data
+  // Hide boundaries for uploaded PDFs/images without parsed notation data
   const drawMeasureBoundaries = useCallback((
     context: CanvasRenderingContext2D,
     width: number,
     height: number,
     scale: number
   ) => {
-    // Only show boundaries when we have structured notation data
+    // CRITICAL: Only show boundaries when we have structured notation data with actual measure positions
+    // Don't show estimated boundaries for uploaded files without proper parsing
     if (!notationData || !notationData.measures.length) return;
+    
+    // Only show if measures have proper beat positions (not placeholder data)
+    // Check if measures have meaningful beat data (not all starting at 0)
+    const hasValidBeatData = notationData.measures.some((m, i) => 
+      i === 0 || m.startBeat > notationData.measures[i - 1].startBeat
+    );
+    
+    if (!hasValidBeatData) return; // Don't show boundaries for placeholder data
     
     // Calculate measure boundaries based on tempo
     const secondsPerBeat = 60 / tempo;
     const totalBeats = notationData.totalBeats || notationData.measures.reduce((sum, m) => sum + m.duration, 0);
-    const totalDuration = totalBeats * secondsPerBeat;
     
     // Draw subtle vertical lines for each measure boundary
     notationData.measures.forEach((measure, index) => {
       // Calculate horizontal position based on beat position
       const measureStartBeat = measure.startBeat;
-      const measureEndBeat = measure.startBeat + measure.duration;
       
       // Convert beat positions to canvas X positions (0-100% of width)
       const startXPercent = (measureStartBeat / totalBeats) * 100;
-      const endXPercent = (measureEndBeat / totalBeats) * 100;
-      
       const startX = (startXPercent / 100) * width;
-      const endX = (endXPercent / 100) * width;
+      
+      // Only draw if position is valid and within canvas bounds
+      if (startX < 0 || startX > width) return;
       
       // Draw measure start line (subtle, like a staff line)
       if (index > 0) { // Don't draw line at the very start
@@ -206,8 +213,8 @@ export default function SheetMusicViewer({
         context.restore();
       }
       
-      // Optionally draw measure number above the line (very subtle)
-      if (index < 8) { // Only show first 8 measures to avoid clutter
+      // Only draw measure numbers for first few measures and only if we have valid data
+      if (index < 8 && hasValidBeatData) {
         context.save();
         context.fillStyle = "rgba(150, 150, 150, 0.4)";
         context.font = `${Math.max(8, 10 * scale)}px sans-serif`;
