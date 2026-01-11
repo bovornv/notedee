@@ -52,6 +52,7 @@ export default function PracticePage() {
   const [hasRecorded, setHasRecorded] = useState(false);
   const [delayedMeasureFeedback, setDelayedMeasureFeedback] = useState<Map<number, NoteFeedback[]>>(new Map());
   const [analyzingMeasures, setAnalyzingMeasures] = useState<Set<number>>(new Set());
+  const [measureAnalysisErrors, setMeasureAnalysisErrors] = useState<Map<number, string>>(new Map());
 
   useEffect(() => {
     if (!user) {
@@ -84,6 +85,7 @@ export default function PracticePage() {
       // Clean up delayed feedback when changing pieces
       setDelayedMeasureFeedback(new Map());
       setAnalyzingMeasures(new Set());
+      setMeasureAnalysisErrors(new Map());
     } else {
       alert("กรุณาเลือกไฟล์ PDF หรือรูปภาพ");
     }
@@ -106,6 +108,7 @@ export default function PracticePage() {
           // Clean up any previous delayed feedback before starting new recording
           setDelayedMeasureFeedback(new Map());
           setAnalyzingMeasures(new Set());
+          setMeasureAnalysisErrors(new Map());
           
           await recorder.start();
           setIsRecording(true);
@@ -281,8 +284,27 @@ export default function PracticePage() {
             }
           } catch (error) {
             console.error("Error analyzing measure:", error);
-            // Silently fail - don't interrupt practice flow
-            // But still remove from analyzing set
+            // Store user-friendly error message
+            const errorMessage = error instanceof Error 
+              ? error.message.includes("audio") || error.message.includes("buffer")
+                ? "Couldn't analyze this measure. Keep playing!"
+                : "Analysis skipped for this measure."
+              : "Analysis skipped for this measure.";
+            
+            setMeasureAnalysisErrors((prev) => {
+              const newMap = new Map(prev);
+              newMap.set(measureToAnalyze, errorMessage);
+              return newMap;
+            });
+            
+            // Remove error message after 3 seconds (non-intrusive)
+            setTimeout(() => {
+              setMeasureAnalysisErrors((prev) => {
+                const newMap = new Map(prev);
+                newMap.delete(measureToAnalyze);
+                return newMap;
+              });
+            }, 3000);
           } finally {
             setAnalyzingMeasures((prev) => {
               const newSet = new Set(prev);
@@ -304,6 +326,7 @@ export default function PracticePage() {
     return () => {
       if (intervalId) clearInterval(intervalId);
       setAnalyzingMeasures(new Set());
+      setMeasureAnalysisErrors(new Map());
     };
   }, [isRecording, feedbackMode, recordingStartTime, tempo, recorder, selectedPiece]);
 
@@ -525,6 +548,7 @@ export default function PracticePage() {
                 feedbackMode={feedbackMode}
                 delayedMeasureFeedback={delayedMeasureFeedback}
                 analyzingMeasures={analyzingMeasures}
+                measureAnalysisErrors={measureAnalysisErrors}
                 tempo={tempo}
                 timeSignature={selectedPiece.notationData?.timeSignature || { numerator: 4, denominator: 4 }}
                 notationData={selectedPiece.notationData}

@@ -25,6 +25,7 @@ interface SheetMusicViewerProps {
   selectedPiece?: MusicPiece | null; // Pass selected piece to check if it's a starter song
   delayedMeasureFeedback?: Map<number, NoteFeedback[]>; // Delayed feedback for completed measures (Practice Mode)
   analyzingMeasures?: Set<number>; // Measures currently being analyzed (for loading indicator)
+  measureAnalysisErrors?: Map<number, string>; // Error messages for failed measure analyses
 }
 
 export default function SheetMusicViewer({
@@ -42,6 +43,7 @@ export default function SheetMusicViewer({
   selectedPiece = null,
   delayedMeasureFeedback = new Map(),
   analyzingMeasures = new Set(),
+  measureAnalysisErrors = new Map(),
 }: SheetMusicViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -248,7 +250,7 @@ export default function SheetMusicViewer({
         context.restore();
       }
     });
-  }, [feedbackMode, isRecording, delayedMeasureFeedback, analyzingMeasures]);
+  }, [feedbackMode, isRecording, delayedMeasureFeedback, analyzingMeasures, measureAnalysisErrors]);
 
   // Draw detailed feedback after performance (post-performance analysis)
   // This is where learning and correction happen - after the student finishes playing
