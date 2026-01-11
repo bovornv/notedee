@@ -337,7 +337,6 @@ export default function PracticePage() {
                 )}
               </div>
             </div>
-          )}
 
           {/* Recording Status Message */}
           {isRecording && (
