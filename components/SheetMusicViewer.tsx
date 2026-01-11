@@ -72,6 +72,9 @@ export default function SheetMusicViewer({
   const lastVisibleNoteRef = useRef<number>(-1); // Track last visible note index for scroll control
   const currentNoteIndexRef = useRef<number>(0); // Track current note being played
   const scrollPendingRef = useRef<boolean>(false); // Track if scroll is pending (waiting for last visible note to complete)
+  const lastBeatRef = useRef<number>(-1); // Track last beat number to update ticker only on beat boundaries
+  const layoutStableRef = useRef<boolean>(false); // Track if layout is stable (no zoom/scroll in progress)
+  const lastTickerXRef = useRef<number>(-1); // Track last ticker X position to prevent jumps
   
   // Determine scroll mode: Mode A (structured) or Mode B (measure-based)
   const hasStructuredNotation = !!notationData && notationData.measures.length > 0;
@@ -206,11 +209,9 @@ export default function SheetMusicViewer({
     };
   }, []);
 
-  // Draw PURELY POSITIONAL guidance during recording
-  // NO correctness evaluation, NO pitch reactions, NO color changes
-  // ONLY purpose: Show "This is where you are in the score"
-  // Draws a note-sized indicator that matches the visual scale of sheet music notes
-  // Positioned WITHIN the music frame (staff/notes area), not across entire canvas
+  // Draw STABLE ticker - anchored to canvas coordinates, never jumps
+  // Updates only when playheadPosition changes (beat boundaries)
+  // Single coordinate system: canvas coordinates only
   const drawLiveGuidance = useCallback((
     context: CanvasRenderingContext2D,
     width: number,
@@ -219,75 +220,58 @@ export default function SheetMusicViewer({
     scale: number
   ) => {
     // CRITICAL: Only show during live recording, NEVER during analysis
-    // If feedback exists, we're in post-analysis mode - don't show live guidance
     if (!isRecording || feedback.length > 0) return;
 
-    // PURELY POSITIONAL: No correctness logic, no pitch detection, no judgment
-    // Indicator advances based ONLY on tempo and beat timing
-    // Single neutral color, low opacity, no animations
-    
-    // Detect music frame bounds (where actual notes are)
-    const musicFrame = detectMusicFrame(width, height);
-    musicFrameRef.current = musicFrame; // Store for use in other functions
+    // Get stable music frame bounds (recalculate to prevent coordinate drift)
+    const musicFrame = musicFrameRef.current || detectMusicFrame(width, height);
+    if (!musicFrame) return;
     
     const musicFrameWidth = musicFrame.right - musicFrame.left;
     
-    // Calculate note head size based on sheet music scale
-    // Typical note head in printed music: ~3-4mm at 100% zoom
-    // Scale with zoom: base size * scale factor
-    const baseNoteSize = 3.5; // Base size in pixels at 1x zoom (matches typical note head)
-    const noteHeadRadius = Math.max(1.5, (baseNoteSize * scale) / 2); // Radius scales with zoom, min 1.5px
-    
-    // Calculate horizontal position WITHIN music frame (not entire canvas)
-    // Map 0-100% position to music frame bounds
-    const minPosition = currentPosition === 0 && isRecording ? 1 : currentPosition; // Show at 1% if at start
-    const positionInFrame = Math.max(0, Math.min(100, minPosition)); // Clamp to 0-100%
+    // Calculate ticker position from playheadPosition (0-100%)
+    // This position is set only on beat boundaries, preventing jitter
+    const positionInFrame = Math.max(0, Math.min(100, currentPosition));
     const playheadX = musicFrame.left + (positionInFrame / 100) * musicFrameWidth;
     
-    // Ensure playhead stays within music frame bounds
+    // SAFETY: Clamp to music frame bounds (prevent leaving visible area)
     const clampedPlayheadX = Math.max(musicFrame.left, Math.min(musicFrame.right, playheadX));
     
-    // Calculate vertical position: approximate staff line positions within music frame
+    // Calculate vertical position: use current system from scroll tracking
     const musicFrameHeight = musicFrame.bottom - musicFrame.top;
     const systemsPerPage = Math.ceil(musicFrameHeight / systemHeightRef.current) || 4;
     const systemHeight = musicFrameHeight / systemsPerPage;
     
-    // Draw indicator on the current active system (where music is being played)
-    // Default to first system if not set yet
+    // Draw indicator on the current active system
     const activeSystem = Math.max(0, Math.min(currentSystemRef.current || 0, systemsPerPage - 1));
     const systemTop = musicFrame.top + (activeSystem * systemHeight);
     const systemBottom = musicFrame.top + ((activeSystem + 1) * systemHeight);
-    const staffCenterY = systemTop + (systemBottom - systemTop) * 0.5; // Middle of system
+    const staffCenterY = systemTop + (systemBottom - systemTop) * 0.5;
     
-    // Always draw if recording (even if position is 0) - make it visible
-    if (isRecording && clampedPlayheadX >= musicFrame.left && clampedPlayheadX <= musicFrame.right && 
+    // Only draw if ticker is within visible music frame
+    if (clampedPlayheadX >= musicFrame.left && clampedPlayheadX <= musicFrame.right && 
         staffCenterY >= musicFrame.top && staffCenterY <= musicFrame.bottom) {
+      
       // RED TICKER - More visible and thicker
-      const baseColor = "rgba(239, 68, 68, 0.8)"; // Red color with 80% opacity
+      const baseColor = "rgba(239, 68, 68, 0.8)";
       
-      const indicatorRadius = feedbackMode === "calm" 
-        ? Math.max(noteHeadRadius, 3.5) // Larger radius for visibility
-        : noteHeadRadius * 1.5; // Practice mode even larger
+      // Calculate note head size based on scale
+      const baseNoteSize = 3.5;
+      const noteHeadRadius = Math.max(3.5, (baseNoteSize * scale) / 2);
       
-      const guideLineHeight = feedbackMode === "calm"
-        ? systemHeight * 0.4 // Taller guide line for visibility
-        : systemHeight * 0.4;
+      const guideLineHeight = systemHeight * 0.4;
       
       context.save();
-      context.globalAlpha = 0.8; // More visible
+      context.globalAlpha = 0.8;
       context.fillStyle = baseColor;
       context.strokeStyle = baseColor;
       
-      // Draw note-sized circle indicator - RED and thicker
-      // This shows "you are here" - nothing more, nothing less
-      // Positioned WITHIN the music frame
+      // Draw ticker circle - RED and thicker
       context.beginPath();
-      context.arc(clampedPlayheadX, staffCenterY, indicatorRadius, 0, Math.PI * 2);
+      context.arc(clampedPlayheadX, staffCenterY, noteHeadRadius, 0, Math.PI * 2);
       context.fill();
       
-      // Draw thicker vertical guide line - RED and more visible
-      // Thicker line width for better visibility
-      context.lineWidth = Math.max(2.5, scale * 0.8); // Much thicker line
+      // Draw thicker vertical guide line - RED
+      context.lineWidth = Math.max(2.5, scale * 0.8);
       context.beginPath();
       const lineTop = Math.max(musicFrame.top, staffCenterY - guideLineHeight / 2);
       const lineBottom = Math.min(musicFrame.bottom, staffCenterY + guideLineHeight / 2);
@@ -297,7 +281,7 @@ export default function SheetMusicViewer({
       
       context.restore();
     }
-  }, [isRecording, feedback.length, feedbackMode, detectMusicFrame]);
+  }, [isRecording, feedback.length, feedbackMode]);
 
   // Draw measure boundary lines ONLY when we have proper structured notation data
   // Hide boundaries for uploaded PDFs/images without parsed notation data
@@ -907,11 +891,11 @@ export default function SheetMusicViewer({
     redraw();
   }, [playheadPosition, isRecording, feedback.length, loading, fileType, drawLiveGuidance, drawFeedback, drawMeasureBoundaries, feedbackMode, notationData, tempo]);
   
-  // NOTE-FRAME-AWARE ticker and auto-scroll
-  // Ticker moves note-by-note based on actual note positions and durations
-  // Auto-scroll ONLY triggers after the last visible note completes
+  // UNIFIED METRONOME-SYNCHRONIZED ticker and auto-scroll
+  // Metronome is the master clock - all timing derived from beat boundaries
+  // Ticker updates ONLY on beat boundaries, never jumps, always anchored to canvas coordinates
   useEffect(() => {
-    if (!autoScrollEnabled || !containerRef.current || loading || !recordingStartTime) {
+    if (!autoScrollEnabled || !containerRef.current || loading || !recordingStartTime || !metronomeEnabled) {
       if (scrollAnimationRef.current) {
         cancelAnimationFrame(scrollAnimationRef.current);
         scrollAnimationRef.current = null;
@@ -921,6 +905,8 @@ export default function SheetMusicViewer({
         currentNoteIndexRef.current = 0;
         lastVisibleNoteRef.current = -1;
         scrollPendingRef.current = false;
+        lastBeatRef.current = -1;
+        lastTickerXRef.current = -1;
       }
       return;
     }
@@ -930,59 +916,106 @@ export default function SheetMusicViewer({
     const systemHeight = systemHeightRef.current;
     const startTime = recordingStartTime;
     const notes = expectedNotesRef.current;
-    const musicFrame = musicFrameRef.current || detectMusicFrame(
-      canvasRef.current?.width || 800,
-      canvasRef.current?.height || 600
-    );
+    
+    // Wait for layout to stabilize before starting ticker
+    if (!layoutStableRef.current) {
+      // Small delay to ensure canvas is rendered
+      setTimeout(() => {
+        layoutStableRef.current = true;
+      }, 100);
+      return;
+    }
 
-    // Calculate total duration from notes
+    // Get stable music frame bounds (recalculate from current canvas)
+    const getStableMusicFrame = () => {
+      if (!canvasRef.current) {
+        return detectMusicFrame(800, 600);
+      }
+      return detectMusicFrame(canvasRef.current.width, canvasRef.current.height);
+    };
+
+    // Calculate total duration from notes or fallback
+    const secondsPerBeat = 60 / tempo;
     const totalDuration = notes.length > 0 
-      ? notes[notes.length - 1].time + (60 / tempo) * beatsPerMeasure // Add one measure duration for last note
-      : (60 / tempo) * beatsPerMeasure * 4; // Fallback: 4 measures
+      ? notes[notes.length - 1].time + secondsPerBeat * beatsPerMeasure
+      : secondsPerBeat * beatsPerMeasure * 4;
+    const totalBeats = totalDuration / secondsPerBeat;
 
-    const animateScroll = () => {
-      if (!autoScrollEnabled || !container || !recordingStartTime || !canvasRef.current) {
+    // Unified beat-based timing system
+    // Updates ticker ONLY on beat boundaries (not every frame)
+    const updateTickerAndScroll = () => {
+      if (!autoScrollEnabled || !container || !recordingStartTime || !canvasRef.current || !layoutStableRef.current) {
         return;
       }
 
       const now = Date.now();
       const elapsedSeconds = (now - startTime) / 1000;
-
-      // Calculate ticker position based on elapsed time and metronome beats
-      // Use beat-based progression, not note-based, to respect metronome timing
-      const secondsPerBeat = 60 / tempo;
-      const totalBeats = totalDuration / secondsPerBeat;
-      const currentBeat = elapsedSeconds / secondsPerBeat;
       
-      // Calculate playhead position based on beat progress (smooth, metronome-synced)
+      // Calculate current beat (metronome-synchronized)
+      const currentBeat = Math.floor(elapsedSeconds / secondsPerBeat);
+      
+      // Only update ticker on beat boundaries (prevent jitter)
+      if (currentBeat === lastBeatRef.current && lastBeatRef.current >= 0) {
+        // Same beat - don't update ticker position, just continue scroll animation
+        scrollAnimationRef.current = requestAnimationFrame(updateTickerAndScroll);
+        return;
+      }
+      
+      // New beat detected - update ticker
+      lastBeatRef.current = currentBeat;
+      
+      // Get stable music frame (recalculate to prevent coordinate drift)
+      const musicFrame = getStableMusicFrame();
+      musicFrameRef.current = musicFrame;
+      
+      // Calculate ticker position based on beat progress (beat-by-beat, no interpolation)
       const beatProgress = Math.min(1, Math.max(0, currentBeat / totalBeats));
       const musicFrameWidth = musicFrame.right - musicFrame.left;
       const tickerX = musicFrame.left + (beatProgress * musicFrameWidth);
-      const playheadPercent = beatProgress * 100;
       
-      // Clamp playhead position
-      const clampedPlayheadPercent = Math.max(0, Math.min(100, playheadPercent));
-      setPlayheadPosition(clampedPlayheadPercent);
+      // SAFETY: Prevent jumps - check if position changed dramatically
+      if (lastTickerXRef.current >= 0) {
+        const jumpThreshold = musicFrameWidth * 0.1; // 10% of frame width
+        const positionDiff = Math.abs(tickerX - lastTickerXRef.current);
+        
+        if (positionDiff > jumpThreshold && currentBeat > 0) {
+          // Suspicious jump detected - use previous position + small increment
+          const safeIncrement = musicFrameWidth / totalBeats;
+          const safeTickerX = Math.min(musicFrame.right, lastTickerXRef.current + safeIncrement);
+          lastTickerXRef.current = safeTickerX;
+          const safeProgress = ((safeTickerX - musicFrame.left) / musicFrameWidth) * 100;
+          setPlayheadPosition(Math.max(0, Math.min(100, safeProgress)));
+        } else {
+          // Normal progression - update position
+          lastTickerXRef.current = tickerX;
+          const playheadPercent = ((tickerX - musicFrame.left) / musicFrameWidth) * 100;
+          setPlayheadPosition(Math.max(0, Math.min(100, playheadPercent)));
+        }
+      } else {
+        // First update - set initial position
+        lastTickerXRef.current = tickerX;
+        const playheadPercent = ((tickerX - musicFrame.left) / musicFrameWidth) * 100;
+        setPlayheadPosition(Math.max(0, Math.min(100, playheadPercent)));
+      }
       
-      // Find current note index for tracking (but don't use it for positioning)
-      const currentNoteIdx = findCurrentNoteIndex(elapsedSeconds, notes);
-      currentNoteIndexRef.current = currentNoteIdx;
+      // Ensure ticker stays within visible music frame
+      const clampedTickerX = Math.max(musicFrame.left, Math.min(musicFrame.right, lastTickerXRef.current));
+      if (clampedTickerX !== lastTickerXRef.current) {
+        lastTickerXRef.current = clampedTickerX;
+        const clampedProgress = ((clampedTickerX - musicFrame.left) / musicFrameWidth) * 100;
+        setPlayheadPosition(Math.max(0, Math.min(100, clampedProgress)));
+      }
 
-      // Calculate current measure based on beats elapsed
-      const beatsElapsed = elapsedSeconds / secondsPerBeat;
-      const currentMeasure = Math.floor(beatsElapsed / beatsPerMeasure);
-      const beatInMeasure = beatsElapsed % beatsPerMeasure;
+      // Calculate current measure based on beats (metronome-synchronized)
+      const currentMeasure = Math.floor(currentBeat / beatsPerMeasure);
+      const beatInMeasure = currentBeat % beatsPerMeasure;
       const progressInMeasure = beatInMeasure / beatsPerMeasure;
       
-      // Determine visible measures based on scroll position
+      // Determine visible measures
       const scrollTop = container.scrollTop;
-      const viewportHeight = container.clientHeight;
       const viewportTop = scrollTop;
-      const viewportBottom = scrollTop + viewportHeight;
-      
-      // Calculate which measures are visible
-      const measuresPerSystem = 4; // Typical: 4 measures per system
-      const systemsPerPage = Math.ceil(canvasHeight / systemHeight);
+      const viewportBottom = scrollTop + container.clientHeight;
+      const measuresPerSystem = 4;
       const totalMeasures = Math.ceil(totalBeats / beatsPerMeasure);
       
       // Find visible measures
@@ -991,23 +1024,22 @@ export default function SheetMusicViewer({
         const measureSystem = Math.floor(m / measuresPerSystem);
         const measureY = measureSystem * systemHeight;
         
-        if (measureY >= viewportTop && measureY <= viewportBottom) {
+        if (measureY >= viewportTop - systemHeight && measureY <= viewportBottom + systemHeight) {
           visibleMeasures.push(m);
         }
       }
       
+      // AUTO-SCROLL: Only trigger after last visible measure completes (beat-synchronized)
       if (visibleMeasures.length > 0) {
         const lastVisibleMeasure = Math.max(...visibleMeasures);
         lastVisibleNoteRef.current = lastVisibleMeasure;
         
-        // Check if last visible measure has completed
-        // A measure is complete when we've moved past its end (progressInMeasure wraps to 0 for next measure)
-        // OR when currentMeasure > lastVisibleMeasure
-        const lastVisibleMeasureCompleted = currentMeasure > lastVisibleMeasure || 
-          (currentMeasure === lastVisibleMeasure && progressInMeasure >= 0.98);
+        // Measure is complete when we've moved to the next measure (beat boundary)
+        // OR when we're at the last beat of the measure (beatInMeasure === beatsPerMeasure - 1)
+        const measureComplete = currentMeasure > lastVisibleMeasure || 
+          (currentMeasure === lastVisibleMeasure && beatInMeasure === beatsPerMeasure - 1);
         
-        // AUTO-SCROLL: Only trigger after last visible measure completes
-        if (lastVisibleMeasureCompleted && !scrollPendingRef.current) {
+        if (measureComplete && !scrollPendingRef.current) {
           scrollPendingRef.current = true;
           
           // Calculate target scroll position (next system)
@@ -1017,20 +1049,17 @@ export default function SheetMusicViewer({
           const maxScroll = Math.max(0, canvasHeight - container.clientHeight);
           const smoothScroll = Math.min(targetScrollTop, maxScroll);
           
-          // Smooth scroll to next system
+          // Smooth scroll to next system (beat-synchronized)
           const currentScroll = container.scrollTop;
           const scrollDiff = smoothScroll - currentScroll;
           
           if (Math.abs(scrollDiff) > 10) {
-            const scrollStep = scrollDiff * 0.15; // Smooth scroll speed
+            const scrollStep = scrollDiff * 0.2; // Smooth scroll speed
             container.scrollTop = currentScroll + scrollStep;
             scrollPositionRef.current = container.scrollTop;
-            
-            // Track current system for indicator positioning
             currentSystemRef.current = Math.floor(smoothScroll / systemHeight);
           }
-        } else if (!lastVisibleMeasureCompleted) {
-          // Reset scroll pending flag when we're still on visible measures
+        } else if (!measureComplete) {
           scrollPendingRef.current = false;
           
           // Smooth scroll to current system during measure
@@ -1061,10 +1090,10 @@ export default function SheetMusicViewer({
         currentSystemRef.current = Math.floor(newScrollTop / systemHeight);
       }
 
-      scrollAnimationRef.current = requestAnimationFrame(animateScroll);
+      scrollAnimationRef.current = requestAnimationFrame(updateTickerAndScroll);
     };
 
-    scrollAnimationRef.current = requestAnimationFrame(animateScroll);
+    scrollAnimationRef.current = requestAnimationFrame(updateTickerAndScroll);
 
     return () => {
       if (scrollAnimationRef.current) {
@@ -1072,7 +1101,7 @@ export default function SheetMusicViewer({
         scrollAnimationRef.current = null;
       }
     };
-  }, [autoScrollEnabled, tempo, timeSignature, recordingStartTime, loading, beatsPerMeasure, isRecording, findCurrentNoteIndex, calculateNotePosition, getVisibleNotes, detectMusicFrame]);
+  }, [autoScrollEnabled, tempo, timeSignature, recordingStartTime, loading, beatsPerMeasure, isRecording, metronomeEnabled, detectMusicFrame]);
 
   const handleZoomIn = () => {
     setZoom((prev) => Math.min(2, prev + 0.25));
