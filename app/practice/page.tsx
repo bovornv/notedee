@@ -189,8 +189,44 @@ export default function PracticePage() {
     const secondsPerBeat = 60 / tempo;
     const secondsPerMeasure = beatsPerMeasure * secondsPerBeat;
 
-    // If we have notation data with measure boundaries, use precise timing
-    const measureBoundaries = selectedPiece.notationData
+    // Track tempo changes during recording for dynamic boundary recalculation
+    let lastTempo = tempo;
+    let tempoChangeTime = recordingStartTime;
+    let accumulatedTimeBeforeTempoChange = 0;
+
+    // Recalculate measure boundaries when tempo changes
+    const recalculateBoundaries = () => {
+      if (!selectedPiece.notationData) return null;
+      
+      // Calculate boundaries based on current tempo
+      const boundaries = calculateMeasureBoundaries(selectedPiece.notationData, tempo);
+      
+      // Adjust for tempo changes: if tempo changed mid-recording, we need to offset
+      if (lastTempo !== tempo && tempoChangeTime !== recordingStartTime) {
+        const timeAtChange = (tempoChangeTime - recordingStartTime) / 1000;
+        const tempoRatio = lastTempo / tempo; // How much faster/slower new tempo is
+        
+        // Adjust boundaries after tempo change
+        return boundaries.map((boundary) => {
+          if (boundary.startTime > timeAtChange) {
+            // This boundary is after tempo change - adjust it
+            const timeAfterChange = boundary.startTime - timeAtChange;
+            const adjustedTime = timeAtChange + (timeAfterChange * tempoRatio);
+            return {
+              ...boundary,
+              startTime: adjustedTime,
+              endTime: adjustedTime + (boundary.endTime - boundary.startTime) * tempoRatio,
+            };
+          }
+          return boundary;
+        });
+      }
+      
+      return boundaries;
+    };
+
+    // Initial measure boundaries
+    let measureBoundaries = selectedPiece.notationData
       ? calculateMeasureBoundaries(selectedPiece.notationData, tempo)
       : null;
 
@@ -203,6 +239,14 @@ export default function PracticePage() {
       if (!isRecording) {
         if (intervalId) clearInterval(intervalId);
         return;
+      }
+
+      // Check for tempo changes and recalculate boundaries if needed
+      if (lastTempo !== tempo) {
+        tempoChangeTime = Date.now();
+        accumulatedTimeBeforeTempoChange += (tempoChangeTime - lastCheckTime) / 1000;
+        measureBoundaries = recalculateBoundaries();
+        lastTempo = tempo;
       }
 
       const now = Date.now();
@@ -224,16 +268,18 @@ export default function PracticePage() {
           measureStart = currentBoundary.startTime;
           measureEnd = currentBoundary.endTime;
         } else {
-          // Fallback to estimation
-          expectedMeasure = Math.floor(elapsedSeconds / secondsPerMeasure) + 1;
-          measureStart = (expectedMeasure - 1) * secondsPerMeasure;
-          measureEnd = measureStart + secondsPerMeasure;
+          // Fallback to estimation (use current tempo, not initial tempo)
+          const currentSecondsPerMeasure = beatsPerMeasure * (60 / tempo);
+          expectedMeasure = Math.floor(elapsedSeconds / currentSecondsPerMeasure) + 1;
+          measureStart = (expectedMeasure - 1) * currentSecondsPerMeasure;
+          measureEnd = measureStart + currentSecondsPerMeasure;
         }
       } else {
-        // Estimate measure boundaries based on tempo
-        expectedMeasure = Math.floor(elapsedSeconds / secondsPerMeasure) + 1;
-        measureStart = (expectedMeasure - 1) * secondsPerMeasure;
-        measureEnd = measureStart + secondsPerMeasure;
+        // Estimate measure boundaries based on current tempo (not initial tempo)
+        const currentSecondsPerMeasure = beatsPerMeasure * (60 / tempo);
+        expectedMeasure = Math.floor(elapsedSeconds / currentSecondsPerMeasure) + 1;
+        measureStart = (expectedMeasure - 1) * currentSecondsPerMeasure;
+        measureEnd = measureStart + currentSecondsPerMeasure;
       }
 
       // If we've moved to a new measure and the previous one hasn't been processed
