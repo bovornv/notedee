@@ -696,6 +696,7 @@ export default function SheetMusicViewer({
   }, [isRecording, feedbackMode, feedback.length, loading, fileType, playheadPosition, delayedMeasureFeedback, analyzingMeasures, measureAnalysisErrors, drawLiveGuidance, drawDelayedMeasureFeedback]);
 
   // Redraw canvas when playhead position changes during recording (for live guidance)
+  // Note: Practice Mode is handled by the animation loop above, so this only handles Calm Mode
   useEffect(() => {
     if (!isRecording || feedback.length > 0 || loading || !canvasRef.current) return;
     if (feedbackMode === "practice") return; // Handled by animation loop above
@@ -706,6 +707,7 @@ export default function SheetMusicViewer({
     const scale = currentScaleRef.current;
 
     // Redraw the base content (PDF or image) and then overlay live guidance
+    // This only runs for Calm Mode (Practice Mode uses the animation loop)
     const redraw = async () => {
       if (fileType === "pdf" && pdfPageRef.current) {
         // Get current viewport scale
@@ -725,13 +727,9 @@ export default function SheetMusicViewer({
           drawMeasureBoundaries(context, canvas.width, canvas.height, currentScale);
         }
         
-        // Overlay live guidance with proper scale (only during recording)
+        // Overlay live guidance with proper scale (only during recording, Calm Mode only)
         if (isRecording && feedback.length === 0) {
           drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition, currentScale);
-          // In Practice Mode, also draw delayed measure feedback
-          if (feedbackMode === "practice") {
-            drawDelayedMeasureFeedback(context, canvas.width, canvas.height);
-          }
         } else if (feedback.length > 0 && !isRecording) {
           drawFeedback(context, canvas.width, canvas.height);
         }
@@ -749,13 +747,9 @@ export default function SheetMusicViewer({
           drawMeasureBoundaries(context, canvas.width, canvas.height, imageScale);
         }
         
-        // Overlay live guidance with proper scale (only during recording)
+        // Overlay live guidance with proper scale (only during recording, Calm Mode only)
         if (isRecording && feedback.length === 0) {
           drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition, imageScale);
-          // In Practice Mode, also draw delayed measure feedback
-          if (feedbackMode === "practice") {
-            drawDelayedMeasureFeedback(context, canvas.width, canvas.height);
-          }
         } else if (feedback.length > 0 && !isRecording) {
           drawFeedback(context, canvas.width, canvas.height);
         }
@@ -763,7 +757,7 @@ export default function SheetMusicViewer({
     };
 
     redraw();
-  }, [playheadPosition, isRecording, feedback.length, loading, fileType, drawLiveGuidance, drawFeedback, drawDelayedMeasureFeedback, drawMeasureBoundaries, feedbackMode, delayedMeasureFeedback, analyzingMeasures, notationData, tempo]);
+  }, [playheadPosition, isRecording, feedback.length, loading, fileType, drawLiveGuidance, drawFeedback, drawMeasureBoundaries, feedbackMode, notationData, tempo]);
   
   // Auto-scroll based on tempo and elapsed time - Rhythm-aware
   useEffect(() => {
