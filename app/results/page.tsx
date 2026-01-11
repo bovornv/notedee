@@ -129,7 +129,7 @@ export default function ResultsPage() {
           {/* Main Issues - Teacher-like, supportive feedback */}
           {mainIssues.length > 0 && (
             <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3">
-              <p className="mb-2 text-sm font-medium text-blue-900">Let's work on:</p>
+              <p className="mb-2 text-sm font-medium text-blue-900">Let&apos;s work on:</p>
               <ul className="list-inside list-disc space-y-1 text-sm text-blue-700">
                 {mainIssues.map((issue, idx) => (
                   <li key={idx}>{issue}</li>

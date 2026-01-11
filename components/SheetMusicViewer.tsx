@@ -416,7 +416,7 @@ export default function SheetMusicViewer({
       }
       setLoading(false);
     }
-  }, [fileUrl, zoom, fitToWidth, drawFeedback, drawDelayedMeasureFeedback, feedbackMode, isRecording, playheadPosition]);
+  }, [fileUrl, zoom, fitToWidth, drawFeedback, drawDelayedMeasureFeedback, drawLiveGuidance, feedbackMode, isRecording, playheadPosition, feedback.length]);
 
   const loadImage = useCallback(async () => {
     if (!fileUrl) {
@@ -489,7 +489,7 @@ export default function SheetMusicViewer({
       setError("RENDER_ERROR");
       setLoading(false);
     }
-  }, [fileUrl, zoom, fitToWidth, drawFeedback, drawLiveGuidance, drawDelayedMeasureFeedback, isRecording, feedback.length, playheadPosition, feedbackMode, delayedMeasureFeedback]);
+  }, [fileUrl, zoom, fitToWidth, drawFeedback, drawLiveGuidance, drawDelayedMeasureFeedback, isRecording, feedback.length, playheadPosition, feedbackMode]);
 
   useEffect(() => {
     if (!fileUrl) {
@@ -777,7 +777,7 @@ export default function SheetMusicViewer({
         scrollAnimationRef.current = null;
       }
     };
-  }, [autoScrollEnabled, tempo, timeSignature, recordingStartTime, loading, hasStructuredNotation, notationData, beatsPerMeasure]);
+  }, [autoScrollEnabled, tempo, timeSignature, recordingStartTime, loading, hasStructuredNotation, notationData, beatsPerMeasure, isRecording, playheadPosition]);
 
   const handleZoomIn = () => {
     setZoom((prev) => Math.min(2, prev + 0.25));
