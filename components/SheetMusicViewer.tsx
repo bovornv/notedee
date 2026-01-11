@@ -106,36 +106,40 @@ export default function SheetMusicViewer({
     const noteHeadRadius = Math.max(1.5, (baseNoteSize * scale) / 2); // Radius scales with zoom, min 1.5px
     
     // Calculate horizontal position (0-100% across canvas width)
-    const playheadX = (currentPosition / 100) * width;
+    // Ensure minimum position so indicator is always visible when recording starts
+    const minPosition = currentPosition === 0 && isRecording ? 2 : currentPosition; // Show at 2% if at start
+    const playheadX = Math.max(10, (minPosition / 100) * width); // Minimum 10px from left edge
     
     // Calculate vertical position: approximate staff line positions
     const systemsPerPage = Math.ceil(height / systemHeightRef.current) || 4;
     const systemHeight = height / systemsPerPage;
     
     // Draw indicator on the current active system (where music is being played)
-    const activeSystem = Math.min(currentSystemRef.current, systemsPerPage - 1);
+    // Default to first system if not set yet
+    const activeSystem = Math.max(0, Math.min(currentSystemRef.current || 0, systemsPerPage - 1));
     const systemTop = activeSystem * systemHeight;
     const systemBottom = (activeSystem + 1) * systemHeight;
     const staffCenterY = systemTop + (systemBottom - systemTop) * 0.5; // Middle of system
     
-    // Only draw if system is in visible area and position is valid
-    if (staffCenterY >= 0 && staffCenterY <= height && playheadX >= 0 && playheadX <= width) {
+    // Always draw if recording (even if position is 0) - make it visible
+    if (isRecording && playheadX >= 0 && playheadX <= width && staffCenterY >= 0 && staffCenterY <= height) {
       // SINGLE NEUTRAL COLOR - Never changes based on correctness
       // Soft blue-gray, low opacity, no flashing, no pulsing
+      // Make it slightly more visible in Calm Mode so users can see it
       const baseColor = feedbackMode === "calm" 
-        ? "rgba(120, 130, 145, 0.3)"  // Calm: 30% opacity
-        : "rgba(100, 116, 139, 0.4)"; // Practice: 40% opacity (slightly more visible)
+        ? "rgba(120, 130, 145, 0.5)"  // Calm: 50% opacity (more visible)
+        : "rgba(100, 116, 139, 0.4)"; // Practice: 40% opacity
       
       const indicatorRadius = feedbackMode === "calm" 
-        ? noteHeadRadius 
+        ? Math.max(noteHeadRadius, 2.5) // Ensure minimum size for visibility
         : noteHeadRadius * 1.2; // Practice mode slightly larger
       
       const guideLineHeight = feedbackMode === "calm"
-        ? systemHeight * 0.25
+        ? systemHeight * 0.3 // Slightly taller guide line for visibility
         : systemHeight * 0.3;
       
       context.save();
-      context.globalAlpha = feedbackMode === "calm" ? 0.3 : 0.4;
+      context.globalAlpha = feedbackMode === "calm" ? 0.5 : 0.4; // More visible in calm mode
       context.fillStyle = baseColor;
       context.strokeStyle = baseColor;
       
@@ -383,7 +387,11 @@ export default function SheetMusicViewer({
 
       // Draw live guidance during recording OR feedback after recording
       if (isRecording && feedback.length === 0) {
-        drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition, scale);
+        drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition || 1, scale);
+        // In Practice Mode, also draw delayed measure feedback
+        if (feedbackMode === "practice") {
+          drawDelayedMeasureFeedback(context, canvas.width, canvas.height);
+        }
       } else if (feedback.length > 0 && !isRecording) {
         drawFeedback(context, canvas.width, canvas.height);
       }
