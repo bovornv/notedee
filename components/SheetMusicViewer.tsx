@@ -585,9 +585,58 @@ export default function SheetMusicViewer({
     }
   }, [autoScrollEnabled]);
 
+  // Continuous animation loop for fade-in effects during Practice Mode
+  useEffect(() => {
+    if (!isRecording || feedbackMode !== "practice" || feedback.length > 0 || loading || !canvasRef.current) return;
+    
+    let animationFrameId: number;
+    const animate = () => {
+      const canvas = canvasRef.current;
+      const context = canvas.getContext("2d");
+      if (!canvas || !context) return;
+      
+      // Redraw base content and overlays
+      const redraw = async () => {
+        if (fileType === "pdf" && pdfPageRef.current) {
+          const currentScale = canvas.width / pdfPageRef.current.view[2];
+          const viewport = pdfPageRef.current.getViewport({ scale: currentScale });
+          context.clearRect(0, 0, canvas.width, canvas.height);
+          await pdfPageRef.current.render({
+            canvasContext: context,
+            viewport: viewport,
+          }).promise;
+          
+          if (isRecording && feedback.length === 0) {
+            drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition || 1, currentScale);
+            drawDelayedMeasureFeedback(context, canvas.width, canvas.height);
+          }
+        } else if (fileType === "image" && imageRef.current) {
+          const imageScale = canvas.width / imageRef.current.width;
+          context.clearRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(imageRef.current, 0, 0, canvas.width, canvas.height);
+          
+          if (isRecording && feedback.length === 0) {
+            drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition || 1, imageScale);
+            drawDelayedMeasureFeedback(context, canvas.width, canvas.height);
+          }
+        }
+      };
+      
+      redraw();
+      animationFrameId = requestAnimationFrame(animate);
+    };
+    
+    animationFrameId = requestAnimationFrame(animate);
+    
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    };
+  }, [isRecording, feedbackMode, feedback.length, loading, fileType, playheadPosition, delayedMeasureFeedback, analyzingMeasures, measureAnalysisErrors, drawLiveGuidance, drawDelayedMeasureFeedback]);
+
   // Redraw canvas when playhead position changes during recording (for live guidance)
   useEffect(() => {
     if (!isRecording || feedback.length > 0 || loading || !canvasRef.current) return;
+    if (feedbackMode === "practice") return; // Handled by animation loop above
     
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
