@@ -290,23 +290,54 @@ export default function PracticePage() {
                       );
                     })}
                   </div>
-                {practiceMode !== "normal" && (
-                  <p className="text-xs text-muted-foreground">
-                    {practiceMode === "accuracy"
-                      ? "Focus on hitting the right notes. Speed doesn't matter."
-                      : "Focus on keeping steady rhythm. Use the metronome to help."}
-                  </p>
-                )}
-                {feedbackMode === "calm" && (
-                  <p className="text-xs text-muted-foreground">
-                    Calm mode: Position tracking only during play. No correctness feedback. Full analysis after you finish.
-                  </p>
-                )}
-                {feedbackMode === "practice" && (
-                  <p className="text-xs text-muted-foreground">
-                    Practice mode: More visible position indicator. Still no live correctness. Analysis appears after Submit.
-                  </p>
-                )}
+                  {practiceMode !== "normal" && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {practiceMode === "accuracy"
+                        ? "Focus on hitting the right notes. Speed doesn't matter."
+                        : "Focus on keeping steady rhythm. Use the metronome to help."}
+                    </p>
+                  )}
+                </div>
+
+                {/* Live Feedback Mode */}
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-foreground block">Live Feedback Mode</label>
+                  <div className="flex gap-2">
+                    {[
+                      { value: "calm", label: "Calm", description: "Minimal guidance" },
+                      { value: "practice", label: "Practice", description: "Delayed measure feedback" },
+                    ].map((mode) => {
+                      const isActive = feedbackMode === mode.value;
+                      return (
+                        <button
+                          key={mode.value}
+                          onClick={() => setFeedbackMode(mode.value as "calm" | "practice")}
+                          disabled={isRecording || countdown !== null}
+                          className={`flex flex-col items-start rounded-lg px-4 py-2.5 text-xs font-medium transition-colors border-2 min-w-[120px] ${
+                            isActive
+                              ? "bg-blue-600 text-white border-blue-700 shadow-md"
+                              : "bg-accent text-foreground hover:bg-accent/80 border-border"
+                          } disabled:opacity-50`}
+                        >
+                          <span className="font-semibold text-sm">{mode.label}</span>
+                          <span className={`text-[10px] mt-0.5 ${isActive ? "text-blue-100" : "text-muted-foreground"}`}>
+                            {mode.description}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {feedbackMode === "calm" && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Position tracking only. No correctness feedback during play. Full analysis after you finish.
+                    </p>
+                  )}
+                  {feedbackMode === "practice" && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Delayed measure-level feedback. Shows correctness after each measure ends. Still calm and supportive.
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
 
