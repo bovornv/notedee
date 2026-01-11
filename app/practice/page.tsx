@@ -156,13 +156,16 @@ export default function PracticePage() {
 
   // Set up measure-level feedback monitoring for Practice Mode
   useEffect(() => {
-    if (!isRecording || feedbackMode !== "practice" || !recordingStartTime) return;
+    if (!isRecording || feedbackMode !== "practice" || !recordingStartTime || !selectedPiece) return;
 
-    const beatsPerMeasure = 4; // Default 4/4 time
+    // Use actual time signature from piece or default to 4/4
+    const actualTimeSignature = selectedPiece.notationData?.timeSignature || { numerator: 4, denominator: 4 };
+    const beatsPerMeasure = actualTimeSignature.numerator;
     const secondsPerBeat = 60 / tempo;
     const secondsPerMeasure = beatsPerMeasure * secondsPerBeat;
 
     // Mock expected notes (in production, this would come from sheet music analysis)
+    // For now, use a simple pattern that matches common practice pieces
     const expectedNotes = [
       { bar: 1, noteIndex: 0, note: "C4", time: 0.5 },
       { bar: 1, noteIndex: 1, note: "C4", time: 1.0 },
@@ -178,6 +181,7 @@ export default function PracticePage() {
 
     let currentMeasure = 1;
     const processedMeasures = new Set<number>();
+    const analyzingMeasures = new Set<number>(); // Track measures currently being analyzed
     let intervalId: NodeJS.Timeout | null = null;
 
     const checkMeasureCompletion = async () => {
@@ -190,9 +194,10 @@ export default function PracticePage() {
       const expectedMeasure = Math.floor(elapsedSeconds / secondsPerMeasure) + 1;
 
       // If we've moved to a new measure and the previous one hasn't been processed
-      if (expectedMeasure > currentMeasure && !processedMeasures.has(currentMeasure - 1)) {
+      if (expectedMeasure > currentMeasure && !processedMeasures.has(currentMeasure - 1) && !analyzingMeasures.has(currentMeasure - 1)) {
         const measureToAnalyze = currentMeasure - 1;
         processedMeasures.add(measureToAnalyze);
+        analyzingMeasures.add(measureToAnalyze);
 
         // Wait a small delay after measure ends before analyzing (delayed feedback)
         setTimeout(async () => {
@@ -201,7 +206,7 @@ export default function PracticePage() {
             const measureEnd = measureStart + secondsPerMeasure;
             
             const audioBuffer = await recorder.getAudioBufferForRange(measureStart, measureEnd);
-            if (audioBuffer) {
+            if (audioBuffer && audioBuffer.length > 0) {
               const result = await analyzeMeasure(
                 audioBuffer,
                 measureToAnalyze,
@@ -220,6 +225,9 @@ export default function PracticePage() {
             }
           } catch (error) {
             console.error("Error analyzing measure:", error);
+            // Silently fail - don't interrupt practice flow
+          } finally {
+            analyzingMeasures.delete(measureToAnalyze);
           }
         }, 200); // 200ms delay after measure ends
 
@@ -233,7 +241,7 @@ export default function PracticePage() {
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [isRecording, feedbackMode, recordingStartTime, tempo, recorder]);
+  }, [isRecording, feedbackMode, recordingStartTime, tempo, recorder, selectedPiece]);
 
   const handleAnalyze = async () => {
     if (!recordedAudio || !selectedPiece) {
@@ -448,6 +456,9 @@ export default function PracticePage() {
                 isRecording={isRecording}
                 recordingStartTime={recordingStartTime}
                 feedbackMode={feedbackMode}
+                delayedMeasureFeedback={delayedMeasureFeedback}
+                tempo={tempo}
+                timeSignature={{ numerator: 4, denominator: 4 }}
               />
             ) : (
               <div className="flex h-full items-center justify-center">

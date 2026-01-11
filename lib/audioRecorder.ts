@@ -66,16 +66,14 @@ export class AudioRecorder {
 
   // Get audio buffer for a specific time range (for measure-level analysis)
   async getAudioBufferForRange(startTime: number, endTime: number): Promise<AudioBuffer | null> {
-    if (!this.audioContext || !this.stream) return null;
-
     try {
-      // Create a new AudioContext to decode the recorded chunks
-      const tempContext = new AudioContext({ sampleRate: 44100 });
-      
       // Get all chunks recorded so far
       const allChunks = [...this.audioChunks];
       if (allChunks.length === 0) return null;
 
+      // Create a new AudioContext to decode the recorded chunks
+      const tempContext = new AudioContext({ sampleRate: 44100 });
+      
       const audioBlob = new Blob(allChunks, {
         type: this.mediaRecorder?.mimeType || "audio/webm",
       });
@@ -88,15 +86,18 @@ export class AudioRecorder {
       const endSample = Math.floor(endTime * fullBuffer.sampleRate);
       const length = endSample - startSample;
 
-      if (length <= 0 || startSample >= fullBuffer.length) return null;
+      if (length <= 0 || startSample >= fullBuffer.length || startSample < 0) {
+        tempContext.close();
+        return null;
+      }
 
       const channelData = fullBuffer.getChannelData(0);
-      const extractedData = channelData.slice(startSample, endSample);
+      const extractedData = channelData.slice(startSample, Math.min(endSample, channelData.length));
 
       // Create new AudioBuffer with extracted data
       const newBuffer = tempContext.createBuffer(
         1,
-        length,
+        extractedData.length,
         fullBuffer.sampleRate
       );
       newBuffer.copyToChannel(extractedData, 0);

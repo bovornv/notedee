@@ -155,6 +155,60 @@ export default function SheetMusicViewer({
     }
   }, [isRecording, feedback.length, feedbackMode]);
 
+  // Draw delayed measure-level feedback during recording (Practice Mode only)
+  // Shows feedback for completed measures with a delay after measure ends
+  const drawDelayedMeasureFeedback = useCallback((
+    context: CanvasRenderingContext2D,
+    width: number,
+    height: number
+  ) => {
+    // Only show in Practice Mode during recording
+    if (feedbackMode !== "practice" || !isRecording || delayedMeasureFeedback.size === 0) return;
+
+    // Group delayed feedback by bar
+    const feedbackByBar: Record<number, NoteFeedback[]> = {};
+    delayedMeasureFeedback.forEach((notes, measureNumber) => {
+      notes.forEach((note) => {
+        if (!feedbackByBar[note.bar]) feedbackByBar[note.bar] = [];
+        feedbackByBar[note.bar].push(note);
+      });
+    });
+
+    // Draw colored overlays for completed measures
+    Object.entries(feedbackByBar).forEach(([barStr, notes]) => {
+      const bar = parseInt(barStr);
+      const totalBars = Math.max(Object.keys(feedbackByBar).length, 1);
+      const barWidth = width / totalBars;
+      const x = (bar - 1) * barWidth;
+
+      // Determine bar color based on worst accuracy in bar
+      const worstAccuracy = notes.reduce((worst, note) => {
+        if (note.accuracy === "wrong") return "wrong";
+        if (note.accuracy === "slightly_off" && worst !== "wrong")
+          return "slightly_off";
+        return worst;
+      }, "correct" as NoteFeedback["accuracy"]);
+
+      // Supportive color palette - clear but not alarming
+      const colors = {
+        correct: "rgba(34, 197, 94, 0.2)", // Softer green - encouraging
+        slightly_off: "rgba(234, 179, 8, 0.2)", // Softer yellow - supportive
+        wrong: "rgba(239, 68, 68, 0.15)", // Softer red - gentle guidance
+      };
+
+      // Draw subtle overlay for completed measure
+      context.fillStyle = colors[worstAccuracy];
+      context.fillRect(x, 0, barWidth, height);
+
+      // Draw measure number with gentle styling
+      if (worstAccuracy !== "correct") {
+        context.fillStyle = "rgba(55, 53, 47, 0.7)";
+        context.font = "12px sans-serif";
+        context.fillText(`Measure ${bar}`, x + 8, 20);
+      }
+    });
+  }, [feedbackMode, isRecording, delayedMeasureFeedback]);
+
   // Draw detailed feedback after performance (post-performance analysis)
   // This is where learning and correction happen - after the student finishes playing
   // Philosophy: Supportive, clear, teacher-like feedback
