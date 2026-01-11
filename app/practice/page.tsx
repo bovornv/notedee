@@ -15,7 +15,7 @@ import { AudioRecorder } from "@/lib/audioRecorder";
 import { analyzeAudio, analyzeMeasure } from "@/lib/audioAnalysis";
 import { extractExpectedNotes, calculateMeasureBoundaries } from "@/lib/notationParser";
 import { t } from "@/lib/translations";
-import { MusicPiece } from "@/types";
+import { MusicPiece, NoteFeedback } from "@/types";
 import { MIN_TEMPO, MAX_TEMPO } from "@/lib/constants";
 import { canStartSession, incrementTodaySessions } from "@/lib/sessionLimits";
 
