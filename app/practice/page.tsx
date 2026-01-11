@@ -155,8 +155,8 @@ export default function PracticePage() {
   };
 
   // Set up measure-level feedback monitoring for Practice Mode
-  const setupMeasureLevelFeedback = (recordingStartTime: number) => {
-    if (feedbackMode !== "practice") return;
+  useEffect(() => {
+    if (!isRecording || feedbackMode !== "practice" || !recordingStartTime) return;
 
     const beatsPerMeasure = 4; // Default 4/4 time
     const secondsPerBeat = 60 / tempo;
@@ -178,14 +178,16 @@ export default function PracticePage() {
 
     let currentMeasure = 1;
     const processedMeasures = new Set<number>();
+    let intervalId: NodeJS.Timeout | null = null;
 
     const checkMeasureCompletion = async () => {
-      if (!isRecording) return;
+      if (!isRecording) {
+        if (intervalId) clearInterval(intervalId);
+        return;
+      }
 
       const elapsedSeconds = (Date.now() - recordingStartTime) / 1000;
       const expectedMeasure = Math.floor(elapsedSeconds / secondsPerMeasure) + 1;
-      const measureStartTime = (expectedMeasure - 1) * secondsPerMeasure;
-      const measureEndTime = measureStartTime + secondsPerMeasure;
 
       // If we've moved to a new measure and the previous one hasn't been processed
       if (expectedMeasure > currentMeasure && !processedMeasures.has(currentMeasure - 1)) {
@@ -223,16 +225,15 @@ export default function PracticePage() {
 
         currentMeasure = expectedMeasure;
       }
-
-      // Continue checking
-      if (isRecording) {
-        setTimeout(checkMeasureCompletion, 100); // Check every 100ms
-      }
     };
 
-    // Start checking after first measure
-    setTimeout(checkMeasureCompletion, secondsPerMeasure * 1000 + 200);
-  };
+    // Start checking after first measure completes
+    intervalId = setInterval(checkMeasureCompletion, 100); // Check every 100ms
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isRecording, feedbackMode, recordingStartTime, tempo, recorder]);
 
   const handleAnalyze = async () => {
     if (!recordedAudio || !selectedPiece) {
