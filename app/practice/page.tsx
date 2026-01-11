@@ -257,14 +257,15 @@ export default function PracticePage() {
             </div>
           </div>
 
-          {/* Practice Mode Selector */}
-          {selectedPiece && (
-            <div className="border-b border-border bg-background px-6 py-4">
-              <div className="mx-auto max-w-4xl space-y-3">
-                <h3 className="text-sm font-semibold text-foreground mb-2">Practice Settings</h3>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-muted-foreground">Practice Mode:</span>
-                  <div className="flex gap-2">
+          {/* Practice Settings - Always visible */}
+          <div className="border-b border-border bg-background px-6 py-4 shadow-sm">
+            <div className="mx-auto max-w-4xl">
+              <h3 className="text-base font-semibold text-foreground mb-4">⚙️ Practice Settings</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Practice Mode */}
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-foreground block">Practice Mode</label>
+                  <div className="flex gap-2 flex-wrap">
                     {[
                       { value: "normal", label: "Normal", icon: Music },
                       { value: "accuracy", label: "Accuracy", icon: Target },
@@ -277,47 +278,18 @@ export default function PracticePage() {
                           key={mode.value}
                           onClick={() => setPracticeMode(mode.value as "normal" | "accuracy" | "rhythm")}
                           disabled={isRecording || countdown !== null}
-                          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
                             isActive
-                              ? "bg-foreground text-background"
+                              ? "bg-foreground text-background shadow-md"
                               : "bg-accent text-foreground hover:bg-accent/80"
                           } disabled:opacity-50`}
                         >
-                          <Icon className="h-3.5 w-3.5" />
+                          <Icon className="h-4 w-4" />
                           {mode.label}
                         </button>
                       );
                     })}
                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-foreground">Live Feedback Mode:</span>
-                  <div className="flex gap-2">
-                    {[
-                      { value: "calm", label: "Calm", description: "Minimal guidance" },
-                      { value: "practice", label: "Practice", description: "More visible" },
-                    ].map((mode) => {
-                      const isActive = feedbackMode === mode.value;
-                      return (
-                        <button
-                          key={mode.value}
-                          onClick={() => setFeedbackMode(mode.value as "calm" | "practice")}
-                          disabled={isRecording || countdown !== null}
-                          className={`flex flex-col items-start rounded-lg px-4 py-2 text-xs font-medium transition-colors border-2 ${
-                            isActive
-                              ? "bg-blue-600 text-white border-blue-700"
-                              : "bg-accent text-foreground hover:bg-accent/80 border-border"
-                          } disabled:opacity-50`}
-                        >
-                          <span className="font-semibold">{mode.label}</span>
-                          <span className={`text-[10px] ${isActive ? "text-blue-100" : "text-muted-foreground"}`}>
-                            {mode.description}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
                 {practiceMode !== "normal" && (
                   <p className="text-xs text-muted-foreground">
                     {practiceMode === "accuracy"
