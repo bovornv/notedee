@@ -260,37 +260,32 @@ export default function SheetMusicViewer({
     // Always draw if recording (even if position is 0) - make it visible
     if (isRecording && clampedPlayheadX >= musicFrame.left && clampedPlayheadX <= musicFrame.right && 
         staffCenterY >= musicFrame.top && staffCenterY <= musicFrame.bottom) {
-      // SINGLE NEUTRAL COLOR - Never changes based on correctness
-      // Soft blue-gray, low opacity, no flashing, no pulsing
-      // Make it slightly more visible in Calm Mode so users can see it
-      const baseColor = feedbackMode === "calm" 
-        ? "rgba(120, 130, 145, 0.5)"  // Calm: 50% opacity (more visible)
-        : "rgba(100, 116, 139, 0.4)"; // Practice: 40% opacity
+      // RED TICKER - More visible and thicker
+      const baseColor = "rgba(239, 68, 68, 0.8)"; // Red color with 80% opacity
       
       const indicatorRadius = feedbackMode === "calm" 
-        ? Math.max(noteHeadRadius, 2.5) // Ensure minimum size for visibility
-        : noteHeadRadius * 1.2; // Practice mode slightly larger
+        ? Math.max(noteHeadRadius, 3.5) // Larger radius for visibility
+        : noteHeadRadius * 1.5; // Practice mode even larger
       
       const guideLineHeight = feedbackMode === "calm"
-        ? systemHeight * 0.3 // Slightly taller guide line for visibility
-        : systemHeight * 0.3;
+        ? systemHeight * 0.4 // Taller guide line for visibility
+        : systemHeight * 0.4;
       
       context.save();
-      context.globalAlpha = feedbackMode === "calm" ? 0.5 : 0.4; // More visible in calm mode
+      context.globalAlpha = 0.8; // More visible
       context.fillStyle = baseColor;
       context.strokeStyle = baseColor;
       
-      // Draw note-sized circle indicator - PURELY POSITIONAL
+      // Draw note-sized circle indicator - RED and thicker
       // This shows "you are here" - nothing more, nothing less
       // Positioned WITHIN the music frame
       context.beginPath();
       context.arc(clampedPlayheadX, staffCenterY, indicatorRadius, 0, Math.PI * 2);
       context.fill();
       
-      // Draw subtle vertical guide line - PURELY POSITIONAL
-      // Like an editor cursor, not a game marker
-      // Line extends within the music frame only
-      context.lineWidth = Math.max(0.5, scale * (feedbackMode === "calm" ? 0.2 : 0.25));
+      // Draw thicker vertical guide line - RED and more visible
+      // Thicker line width for better visibility
+      context.lineWidth = Math.max(2.5, scale * 0.8); // Much thicker line
       context.beginPath();
       const lineTop = Math.max(musicFrame.top, staffCenterY - guideLineHeight / 2);
       const lineBottom = Math.min(musicFrame.bottom, staffCenterY + guideLineHeight / 2);
