@@ -39,6 +39,8 @@ export default function SheetMusicViewer({
 }: SheetMusicViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const pdfPageRef = useRef<any>(null); // Store PDF page for redrawing
+  const imageRef = useRef<HTMLImageElement | null>(null); // Store image for redrawing
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -70,12 +72,49 @@ export default function SheetMusicViewer({
     }
   }, [loading, canvasRef.current?.height]);
 
+  // Draw neutral positional guidance during recording (calm mode)
+  const drawLiveGuidance = useCallback((
+    context: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    currentPosition: number
+  ) => {
+    if (!isRecording || feedback.length > 0) return; // Only show during live recording, not after feedback
+
+    // Draw a soft, neutral highlight for current position
+    // Use a subtle blue-gray color for guidance, not judgment
+    const guidanceColor = "rgba(100, 116, 139, 0.15)"; // Soft slate blue
+    const playheadColor = "rgba(100, 116, 139, 0.4)"; // Slightly more visible playhead
+    
+    // Draw playhead line (vertical line showing current position)
+    const playheadX = (currentPosition / 100) * width;
+    context.strokeStyle = playheadColor;
+    context.lineWidth = 2;
+    context.setLineDash([]);
+    context.beginPath();
+    context.moveTo(playheadX, 0);
+    context.lineTo(playheadX, height);
+    context.stroke();
+
+    // Draw subtle highlight around current area (wider highlight)
+    const highlightWidth = width * 0.1; // 10% of width
+    context.fillStyle = guidanceColor;
+    context.fillRect(
+      Math.max(0, playheadX - highlightWidth / 2),
+      0,
+      highlightWidth,
+      height
+    );
+  }, [isRecording, feedback.length]);
+
+  // Draw detailed feedback after performance (post-performance analysis)
   const drawFeedback = useCallback((
     context: CanvasRenderingContext2D,
     width: number,
     height: number
   ) => {
-    if (feedback.length === 0) return;
+    // Only show feedback after recording is complete
+    if (feedback.length === 0 || isRecording) return;
 
     // Group feedback by bar
     const feedbackByBar = feedback.reduce((acc, f) => {
@@ -112,7 +151,7 @@ export default function SheetMusicViewer({
       context.font = "16px sans-serif";
       context.fillText(`Bar ${bar}`, x + 10, 30);
     });
-  }, [feedback]);
+  }, [feedback, isRecording]);
 
   const loadPDF = useCallback(async () => {
     if (!fileUrl) {
@@ -154,6 +193,7 @@ export default function SheetMusicViewer({
       
       const pdf = await loadingTask.promise;
       const page = await pdf.getPage(1);
+      pdfPageRef.current = page; // Store for redrawing
 
       // Calculate scale based on fit-to-width or zoom
       let scale = 2.0;
@@ -191,7 +231,12 @@ export default function SheetMusicViewer({
         viewport: viewport,
       }).promise;
 
-      drawFeedback(context, canvas.width, canvas.height);
+      // Draw live guidance during recording OR feedback after recording
+      if (isRecording && feedback.length === 0) {
+        drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition);
+      } else {
+        drawFeedback(context, canvas.width, canvas.height);
+      }
       
       // Update refs for auto-scroll
       canvasHeightRef.current = canvas.height;
@@ -228,6 +273,7 @@ export default function SheetMusicViewer({
 
       const img = new Image();
       img.crossOrigin = "anonymous";
+      imageRef.current = img; // Store for redrawing
 
       img.onload = () => {
         const canvas = canvasRef.current;
@@ -256,7 +302,13 @@ export default function SheetMusicViewer({
         context.clearRect(0, 0, canvas.width, canvas.height);
         
         context.drawImage(img, 0, 0, canvas.width, canvas.height);
-        drawFeedback(context, canvas.width, canvas.height);
+        
+        // Draw live guidance during recording OR feedback after recording
+        if (isRecording && feedback.length === 0) {
+          drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition);
+        } else {
+          drawFeedback(context, canvas.width, canvas.height);
+        }
         canvasHeightRef.current = canvas.height;
         systemHeightRef.current = Math.max(200, canvas.height / 5);
         setLoading(false);
@@ -334,6 +386,43 @@ export default function SheetMusicViewer({
       setPlayheadPosition(0);
     }
   }, [autoScrollEnabled]);
+
+  // Redraw canvas when playhead position changes during recording (for live guidance)
+  useEffect(() => {
+    if (!isRecording || feedback.length > 0 || loading || !canvasRef.current) return;
+    
+    const canvas = canvasRef.current;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+
+    // Redraw the base content (PDF or image) and then overlay live guidance
+    const redraw = async () => {
+      if (fileType === "pdf" && pdfPageRef.current) {
+        // Get current viewport scale
+        const currentScale = canvas.width / pdfPageRef.current.view[2];
+        const viewport = pdfPageRef.current.getViewport({ scale: currentScale });
+        
+        // Clear and redraw PDF
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        await pdfPageRef.current.render({
+          canvasContext: context,
+          viewport: viewport,
+        }).promise;
+        
+        // Overlay live guidance
+        drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition);
+      } else if (fileType === "image" && imageRef.current) {
+        // Clear and redraw image
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(imageRef.current, 0, 0, canvas.width, canvas.height);
+        
+        // Overlay live guidance
+        drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition);
+      }
+    };
+
+    redraw();
+  }, [playheadPosition, isRecording, feedback.length, loading, fileType, drawLiveGuidance]);
   
   // Auto-scroll based on tempo and elapsed time - Rhythm-aware
   useEffect(() => {
