@@ -647,8 +647,9 @@ export default function SheetMusicViewer({
     let animationFrameId: number;
     const animate = () => {
       const canvas = canvasRef.current;
+      if (!canvas) return;
       const context = canvas.getContext("2d");
-      if (!canvas || !context) return;
+      if (!context) return;
       
       // Redraw base content and overlays
       const redraw = async () => {
