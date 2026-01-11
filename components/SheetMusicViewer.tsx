@@ -213,10 +213,20 @@ export default function SheetMusicViewer({
       }
     });
 
-    // Draw colored overlays for completed measures
+    // Draw colored overlays for completed measures with smooth fade-in
     Object.entries(feedbackByBar).forEach(([barStr, notes]) => {
       const bar = parseInt(barStr);
       const x = (bar - 1) * barWidth;
+
+      // Track when this measure was first added for fade-in animation
+      if (!measureTimestampsRef.current.has(bar)) {
+        measureTimestampsRef.current.set(bar, Date.now());
+      }
+      const addedAt = measureTimestampsRef.current.get(bar) || Date.now();
+      const fadeInDuration = 400; // 400ms fade-in
+      const elapsed = Date.now() - addedAt;
+      const fadeProgress = Math.min(1, elapsed / fadeInDuration);
+      const fadeAlpha = 0.3 + (fadeProgress * 0.55); // Fade from 30% to 85% opacity
 
       // Determine bar color based on worst accuracy in bar
       const worstAccuracy = notes.reduce((worst, note) => {
@@ -235,14 +245,15 @@ export default function SheetMusicViewer({
 
       // Draw subtle overlay for completed measure with smooth fade-in effect
       context.save();
-      context.globalAlpha = 0.85; // Slight transparency for smoother appearance
+      context.globalAlpha = fadeAlpha;
       context.fillStyle = colors[worstAccuracy];
       context.fillRect(x, 0, barWidth, height);
       context.restore();
 
-      // Draw measure number with gentle styling
+      // Draw measure number with gentle styling and fade-in
       if (worstAccuracy !== "correct") {
         context.save();
+        context.globalAlpha = 0.5 + (fadeProgress * 0.25); // Fade text in too
         context.fillStyle = "rgba(55, 53, 47, 0.75)";
         context.font = "12px sans-serif";
         context.textAlign = "left";
@@ -250,6 +261,26 @@ export default function SheetMusicViewer({
         context.fillText(`Measure ${bar}`, x + 8, 20);
         context.restore();
       }
+    });
+
+    // Draw error messages for failed analyses (non-intrusive, subtle)
+    measureAnalysisErrors.forEach((errorMessage, measureNumber) => {
+      const x = (measureNumber - 1) * barWidth;
+      context.save();
+      context.globalAlpha = 0.4;
+      context.fillStyle = "rgba(156, 163, 175, 0.3)"; // Subtle gray
+      context.fillRect(x, 0, barWidth, height);
+      context.restore();
+      
+      // Draw subtle error indicator
+      context.save();
+      context.globalAlpha = 0.5;
+      context.fillStyle = "rgba(107, 114, 128, 0.6)";
+      context.font = "10px sans-serif";
+      context.textAlign = "left";
+      context.textBaseline = "top";
+      context.fillText("—", x + 8, 22); // Simple dash indicator
+      context.restore();
     });
   }, [feedbackMode, isRecording, delayedMeasureFeedback, analyzingMeasures, measureAnalysisErrors]);
 
