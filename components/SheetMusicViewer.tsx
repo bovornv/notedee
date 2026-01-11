@@ -72,10 +72,6 @@ export default function SheetMusicViewer({
   const lastVisibleNoteRef = useRef<number>(-1); // Track last visible note index for scroll control
   const currentNoteIndexRef = useRef<number>(0); // Track current note being played
   const scrollPendingRef = useRef<boolean>(false); // Track if scroll is pending (waiting for last visible note to complete)
-  const expectedNotesRef = useRef<Array<{ bar: number; noteIndex: number; note: string; time: number }>>([]); // Track expected notes for ticker positioning
-  const lastVisibleNoteRef = useRef<number>(-1); // Track last visible note index for scroll control
-  const currentNoteIndexRef = useRef<number>(0); // Track current note being played
-  const scrollPendingRef = useRef<boolean>(false); // Track if scroll is pending (waiting for last visible note to complete)
   
   // Determine scroll mode: Mode A (structured) or Mode B (measure-based)
   const hasStructuredNotation = !!notationData && notationData.measures.length > 0;
