@@ -4,6 +4,7 @@ const nextConfig = {
   // Allow ESLint warnings during build (only errors will fail)
   eslint: {
     ignoreDuringBuilds: false,
+    // Warnings won't fail the build, only errors will
   },
   typescript: {
     ignoreBuildErrors: false,
