@@ -327,12 +327,12 @@ export default function PracticePage() {
                 )}
                 {feedbackMode === "calm" && (
                   <p className="text-xs text-muted-foreground">
-                    Calm mode: Minimal guidance during playing. Focus on your music. Detailed feedback appears after you finish.
+                    Calm mode: Position tracking only during play. No correctness feedback. Full analysis after you finish.
                   </p>
                 )}
                 {feedbackMode === "practice" && (
                   <p className="text-xs text-muted-foreground">
-                    Practice mode: Limited bar-level feedback (delayed). Still focuses on guidance, not instant judgment.
+                    Practice mode: More visible position indicator. Still no live correctness. Analysis appears after Submit.
                   </p>
                 )}
               </div>

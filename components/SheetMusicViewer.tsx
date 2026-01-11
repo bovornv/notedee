@@ -76,9 +76,10 @@ export default function SheetMusicViewer({
     }
   }, [loading, canvasRef.current?.height]);
 
-  // Draw neutral positional guidance during recording (calm mode)
+  // Draw PURELY POSITIONAL guidance during recording
+  // NO correctness evaluation, NO pitch reactions, NO color changes
+  // ONLY purpose: Show "This is where you are in the score"
   // Draws a note-sized indicator that matches the visual scale of sheet music notes
-  // Philosophy: Guidance-first, not judgment. Shows "where you are" not "how you're doing"
   const drawLiveGuidance = useCallback((
     context: CanvasRenderingContext2D,
     width: number,
@@ -86,11 +87,13 @@ export default function SheetMusicViewer({
     currentPosition: number,
     scale: number
   ) => {
-    if (!isRecording || feedback.length > 0) return; // Only show during live recording, not after feedback
+    // CRITICAL: Only show during live recording, NEVER during analysis
+    // If feedback exists, we're in post-analysis mode - don't show live guidance
+    if (!isRecording || feedback.length > 0) return;
 
-    // CALM MODE: Minimal, neutral positional guidance
-    // No correctness indicators, no color changes, no flashing
-    // Just a gentle "you are here" marker
+    // PURELY POSITIONAL: No correctness logic, no pitch detection, no judgment
+    // Indicator advances based ONLY on tempo and beat timing
+    // Single neutral color, low opacity, no animations
     
     // Calculate note head size based on sheet music scale
     // Typical note head in printed music: ~3-4mm at 100% zoom
@@ -113,58 +116,40 @@ export default function SheetMusicViewer({
     
     // Only draw if system is in visible area and position is valid
     if (staffCenterY >= 0 && staffCenterY <= height && playheadX >= 0 && playheadX <= width) {
-      if (feedbackMode === "calm") {
-        // CALM MODE: Ultra-subtle, neutral guidance
-        // Single soft color, very low opacity, no borders, no animations
-        // Feels like a patient teacher pointing, not a game marker
-        const indicatorColor = "rgba(120, 130, 145, 0.3)"; // Soft slate gray, 30% opacity (slightly more visible)
-        
-        context.save();
-        context.globalAlpha = 0.3; // Low opacity for subtlety
-        context.fillStyle = indicatorColor;
-        
-        // Draw a small filled circle (note head size) - like a gentle cursor
-        // This is orientation only, not judgment
-        context.beginPath();
-        context.arc(playheadX, staffCenterY, noteHeadRadius, 0, Math.PI * 2);
-        context.fill();
-        
-        // Draw a very subtle vertical guide line (like an editor cursor)
-        // Short line - just enough to show alignment
-        const guideLineHeight = systemHeight * 0.25; // 25% of system height
-        context.strokeStyle = indicatorColor;
-        context.lineWidth = Math.max(0.5, scale * 0.2); // Very thin, scales with zoom
-        context.beginPath();
-        context.moveTo(playheadX, staffCenterY - guideLineHeight / 2);
-        context.lineTo(playheadX, staffCenterY + guideLineHeight / 2);
-        context.stroke();
-        
-        context.restore();
-      } else if (feedbackMode === "practice") {
-        // PRACTICE MODE: Slightly more visible, but still guidance-first
-        // Limited bar-level feedback (delayed) - not instant note-by-note
-        const indicatorColor = "rgba(100, 116, 139, 0.4)"; // Slightly more visible
-        
-        context.save();
-        context.globalAlpha = 0.4;
-        context.fillStyle = indicatorColor;
-        
-        // Draw indicator circle
-        context.beginPath();
-        context.arc(playheadX, staffCenterY, noteHeadRadius * 1.2, 0, Math.PI * 2);
-        context.fill();
-        
-        // Draw guide line
-        const guideLineHeight = systemHeight * 0.3;
-        context.strokeStyle = indicatorColor;
-        context.lineWidth = Math.max(0.6, scale * 0.25);
-        context.beginPath();
-        context.moveTo(playheadX, staffCenterY - guideLineHeight / 2);
-        context.lineTo(playheadX, staffCenterY + guideLineHeight / 2);
-        context.stroke();
-        
-        context.restore();
-      }
+      // SINGLE NEUTRAL COLOR - Never changes based on correctness
+      // Soft blue-gray, low opacity, no flashing, no pulsing
+      const baseColor = feedbackMode === "calm" 
+        ? "rgba(120, 130, 145, 0.3)"  // Calm: 30% opacity
+        : "rgba(100, 116, 139, 0.4)"; // Practice: 40% opacity (slightly more visible)
+      
+      const indicatorRadius = feedbackMode === "calm" 
+        ? noteHeadRadius 
+        : noteHeadRadius * 1.2; // Practice mode slightly larger
+      
+      const guideLineHeight = feedbackMode === "calm"
+        ? systemHeight * 0.25
+        : systemHeight * 0.3;
+      
+      context.save();
+      context.globalAlpha = feedbackMode === "calm" ? 0.3 : 0.4;
+      context.fillStyle = baseColor;
+      context.strokeStyle = baseColor;
+      
+      // Draw note-sized circle indicator - PURELY POSITIONAL
+      // This shows "you are here" - nothing more, nothing less
+      context.beginPath();
+      context.arc(playheadX, staffCenterY, indicatorRadius, 0, Math.PI * 2);
+      context.fill();
+      
+      // Draw subtle vertical guide line - PURELY POSITIONAL
+      // Like an editor cursor, not a game marker
+      context.lineWidth = Math.max(0.5, scale * (feedbackMode === "calm" ? 0.2 : 0.25));
+      context.beginPath();
+      context.moveTo(playheadX, staffCenterY - guideLineHeight / 2);
+      context.lineTo(playheadX, staffCenterY + guideLineHeight / 2);
+      context.stroke();
+      
+      context.restore();
     }
   }, [isRecording, feedback.length, feedbackMode]);
 
