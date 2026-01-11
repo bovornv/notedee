@@ -458,7 +458,8 @@ export default function PracticePage() {
                 feedbackMode={feedbackMode}
                 delayedMeasureFeedback={delayedMeasureFeedback}
                 tempo={tempo}
-                timeSignature={{ numerator: 4, denominator: 4 }}
+                timeSignature={selectedPiece.notationData?.timeSignature || { numerator: 4, denominator: 4 }}
+                notationData={selectedPiece.notationData}
               />
             ) : (
               <div className="flex h-full items-center justify-center">
