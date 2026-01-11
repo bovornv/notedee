@@ -40,17 +40,50 @@ function extractNotesFromNotationData(
   const expectedNotes: Array<{ bar: number; noteIndex: number; note: string; time: number }> = [];
   const measuresToProcess = maxMeasures ? measures.slice(0, maxMeasures) : measures;
 
+  // Determine note density based on time signature
+  // Compound time signatures (6/8, 9/8, 12/8) have different feel than simple (4/4, 3/4)
+  const isCompoundTime = beatValue === 8 && beatsPerMeasure % 3 === 0; // 6/8, 9/8, 12/8
+  const isSimpleTime = beatValue === 4 || (beatValue === 2 && beatsPerMeasure <= 4); // 4/4, 3/4, 2/4, 2/2
+  const isCutTime = beatValue === 2 && beatsPerMeasure === 2; // 2/2 (cut time)
+  
+  // Calculate subdivision based on time signature type
+  let baseSubdivision: number;
+  if (isCompoundTime) {
+    // Compound time: 6/8 = 2 beats per measure (each beat = 3 eighth notes)
+    // Generate notes at eighth-note level for compound time
+    baseSubdivision = 0.125; // Eighth note subdivisions
+  } else if (isCutTime) {
+    // Cut time: 2/2 = 2 half notes per measure
+    baseSubdivision = 0.5; // Half note subdivisions
+  } else if (beatValue === 8) {
+    // Other 8th-note time signatures (3/8, 5/8, 7/8)
+    baseSubdivision = 0.25; // Eighth note subdivisions
+  } else {
+    // Simple time signatures (4/4, 3/4, 2/4)
+    baseSubdivision = 0.5; // Quarter note subdivisions
+  }
+
   // For each measure, generate expected notes based on beat positions
   measuresToProcess.forEach((measure) => {
     const measureNumber = measure.measureNumber;
     const measureStartBeat = measure.startBeat;
     const measureDuration = measure.duration;
 
-    // Generate notes at regular intervals within the measure
-    // Adjust note density based on time signature (e.g., 6/8 has more subdivisions)
-    // In production, this would come from actual note data in the measure
-    const baseSubdivision = beatValue === 8 ? 0.25 : 0.5; // More notes for 8th-note time signatures
-    const notesPerMeasure = Math.max(2, Math.floor(beatsPerMeasure / baseSubdivision));
+    // Calculate notes per measure based on time signature
+    // For compound time, we want more granular subdivisions
+    let notesPerMeasure: number;
+    if (isCompoundTime) {
+      // 6/8: 6 eighth notes = 2 dotted quarter beats
+      // Generate notes at eighth-note level
+      notesPerMeasure = Math.max(4, Math.floor(beatsPerMeasure / baseSubdivision));
+    } else if (isCutTime) {
+      // 2/2: 2 half notes
+      notesPerMeasure = Math.max(2, Math.floor(beatsPerMeasure / baseSubdivision));
+    } else {
+      // Standard: generate notes based on beat value
+      notesPerMeasure = Math.max(2, Math.floor(beatsPerMeasure / baseSubdivision));
+    }
+    
     const beatInterval = measureDuration / notesPerMeasure;
 
     for (let i = 0; i < notesPerMeasure; i++) {
