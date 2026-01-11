@@ -103,6 +103,10 @@ export default function PracticePage() {
       // Countdown finished, start actual recording
       const startActualRecording = async () => {
         try {
+          // Clean up any previous delayed feedback before starting new recording
+          setDelayedMeasureFeedback(new Map());
+          setAnalyzingMeasures(new Set());
+          
           await recorder.start();
           setIsRecording(true);
           setRecordingStartTime(Date.now());
@@ -121,6 +125,9 @@ export default function PracticePage() {
           } else {
             alert("ไม่สามารถเข้าถึงไมโครโฟนได้ กรุณาตรวจสอบการตั้งค่า");
           }
+          // Clean up on error
+          setDelayedMeasureFeedback(new Map());
+          setAnalyzingMeasures(new Set());
         }
       };
       startActualRecording();
@@ -150,12 +157,16 @@ export default function PracticePage() {
       setIsRecording(false);
       setRecordedAudio(audioBlob);
       setHasRecorded(true);
-      // Clear delayed feedback when stopping
+      // Clean up delayed feedback and analyzing measures when stopping
       setDelayedMeasureFeedback(new Map());
+      setAnalyzingMeasures(new Set());
     } catch (error) {
       console.error("Error stopping recording:", error);
       alert("เกิดข้อผิดพลาดในการหยุดการบันทึก");
       setIsRecording(false);
+      // Clean up on error too
+      setDelayedMeasureFeedback(new Map());
+      setAnalyzingMeasures(new Set());
     }
   };
 
