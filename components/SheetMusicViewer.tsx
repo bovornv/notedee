@@ -115,6 +115,7 @@ export default function SheetMusicViewer({
 
   // Find current note index based on elapsed time
   // Returns the note index that should currently be playing
+  // Respects metronome timing - doesn't skip beats
   const findCurrentNoteIndex = useCallback((
     elapsedSeconds: number,
     notes: Array<{ bar: number; noteIndex: number; note: string; time: number }>
@@ -122,11 +123,12 @@ export default function SheetMusicViewer({
     if (notes.length === 0) return 0;
     
     // Find the note that should be playing based on timing
+    // Use <= for next note to ensure we stay on current note until it's time to move
     for (let i = 0; i < notes.length - 1; i++) {
       const currentNote = notes[i];
       const nextNote = notes[i + 1];
       
-      // If elapsed time is between current note and next note, return current note index
+      // If elapsed time is at or past current note but before next note, return current note index
       if (elapsedSeconds >= currentNote.time && elapsedSeconds < nextNote.time) {
         return i;
       }
@@ -946,73 +948,72 @@ export default function SheetMusicViewer({
       const now = Date.now();
       const elapsedSeconds = (now - startTime) / 1000;
 
-      // Find current note index based on elapsed time
+      // Calculate ticker position based on elapsed time and metronome beats
+      // Use beat-based progression, not note-based, to respect metronome timing
+      const secondsPerBeat = 60 / tempo;
+      const totalBeats = totalDuration / secondsPerBeat;
+      const currentBeat = elapsedSeconds / secondsPerBeat;
+      
+      // Calculate playhead position based on beat progress (smooth, metronome-synced)
+      const beatProgress = Math.min(1, Math.max(0, currentBeat / totalBeats));
+      const musicFrameWidth = musicFrame.right - musicFrame.left;
+      const tickerX = musicFrame.left + (beatProgress * musicFrameWidth);
+      const playheadPercent = beatProgress * 100;
+      
+      // Clamp playhead position
+      const clampedPlayheadPercent = Math.max(0, Math.min(100, playheadPercent));
+      setPlayheadPosition(clampedPlayheadPercent);
+      
+      // Find current note index for tracking (but don't use it for positioning)
       const currentNoteIdx = findCurrentNoteIndex(elapsedSeconds, notes);
       currentNoteIndexRef.current = currentNoteIdx;
 
-      // Calculate ticker position based on current note
-      let tickerX: number;
-      let playheadPercent: number;
-
-      if (notes.length > 0 && currentNoteIdx < notes.length) {
-        const currentNote = notes[currentNoteIdx];
-        const nextNote = notes[currentNoteIdx + 1];
-        
-        // Calculate position within current note's frame
-        if (nextNote) {
-          // Interpolate between current note and next note
-          const noteDuration = nextNote.time - currentNote.time;
-          const progressInNote = noteDuration > 0 
-            ? Math.min(1, Math.max(0, (elapsedSeconds - currentNote.time) / noteDuration))
-            : 0;
-          
-          const currentNoteX = calculateNotePosition(currentNote.time, musicFrame, totalDuration);
-          const nextNoteX = calculateNotePosition(nextNote.time, musicFrame, totalDuration);
-          tickerX = currentNoteX + (nextNoteX - currentNoteX) * progressInNote;
-        } else {
-          // Last note - stay at note position
-          tickerX = calculateNotePosition(currentNote.time, musicFrame, totalDuration);
-        }
-        
-        // Convert to percentage for playheadPosition state
-        const musicFrameWidth = musicFrame.right - musicFrame.left;
-        playheadPercent = ((tickerX - musicFrame.left) / musicFrameWidth) * 100;
-      } else {
-        // No notes or before first note - use time-based estimation
-        const progress = Math.min(1, elapsedSeconds / totalDuration);
-        playheadPercent = progress * 100;
-        tickerX = musicFrame.left + (progress * (musicFrame.right - musicFrame.left));
-      }
-
-      // Clamp playhead position
-      playheadPercent = Math.max(0, Math.min(100, playheadPercent));
-      setPlayheadPosition(playheadPercent);
-
-      // Determine visible notes
-      const visibleNoteIndices = getVisibleNotes(container, canvasHeight, musicFrame, notes, totalDuration);
+      // Calculate current measure based on beats elapsed
+      const secondsPerBeat = 60 / tempo;
+      const beatsElapsed = elapsedSeconds / secondsPerBeat;
+      const currentMeasure = Math.floor(beatsElapsed / beatsPerMeasure);
+      const beatInMeasure = beatsElapsed % beatsPerMeasure;
+      const progressInMeasure = beatInMeasure / beatsPerMeasure;
       
-      if (visibleNoteIndices.length > 0) {
-        const lastVisibleIdx = Math.max(...visibleNoteIndices);
-        lastVisibleNoteRef.current = lastVisibleIdx;
+      // Determine visible measures based on scroll position
+      const scrollTop = container.scrollTop;
+      const viewportHeight = container.clientHeight;
+      const viewportTop = scrollTop;
+      const viewportBottom = scrollTop + viewportHeight;
+      
+      // Calculate which measures are visible
+      const measuresPerSystem = 4; // Typical: 4 measures per system
+      const systemsPerPage = Math.ceil(canvasHeight / systemHeight);
+      const totalMeasures = Math.ceil(totalBeats / beatsPerMeasure);
+      
+      // Find visible measures
+      const visibleMeasures: number[] = [];
+      for (let m = 0; m < totalMeasures; m++) {
+        const measureSystem = Math.floor(m / measuresPerSystem);
+        const measureY = measureSystem * systemHeight;
         
-        const lastVisibleNote = notes[lastVisibleIdx];
-        const nextNoteAfterLastVisible = notes[lastVisibleIdx + 1];
+        if (measureY >= viewportTop && measureY <= viewportBottom) {
+          visibleMeasures.push(m);
+        }
+      }
+      
+      if (visibleMeasures.length > 0) {
+        const lastVisibleMeasure = Math.max(...visibleMeasures);
+        lastVisibleNoteRef.current = lastVisibleMeasure;
         
-        // Check if last visible note has completed
-        // A note is "complete" when we've moved past its end time (or start of next note)
-        const noteEndTime = nextNoteAfterLastVisible 
-          ? nextNoteAfterLastVisible.time 
-          : lastVisibleNote.time + (60 / tempo) * beatsPerMeasure; // Default duration
+        // Check if last visible measure has completed
+        // A measure is complete when we've moved past its end (progressInMeasure wraps to 0 for next measure)
+        // OR when currentMeasure > lastVisibleMeasure
+        const lastVisibleMeasureCompleted = currentMeasure > lastVisibleMeasure || 
+          (currentMeasure === lastVisibleMeasure && progressInMeasure >= 0.98);
         
-        const lastVisibleNoteCompleted = elapsedSeconds >= noteEndTime;
-        
-        // AUTO-SCROLL: Only trigger after last visible note completes
-        if (lastVisibleNoteCompleted && !scrollPendingRef.current) {
+        // AUTO-SCROLL: Only trigger after last visible measure completes
+        if (lastVisibleMeasureCompleted && !scrollPendingRef.current) {
           scrollPendingRef.current = true;
           
           // Calculate target scroll position (next system)
-          const estimatedSystem = Math.floor((noteEndTime / totalDuration) * (canvasHeight / systemHeight));
-          const targetSystem = Math.min(estimatedSystem + 1, Math.ceil(canvasHeight / systemHeight) - 1);
+          const targetMeasure = Math.min(lastVisibleMeasure + 1, totalMeasures - 1);
+          const targetSystem = Math.floor(targetMeasure / measuresPerSystem);
           const targetScrollTop = targetSystem * systemHeight;
           const maxScroll = Math.max(0, canvasHeight - container.clientHeight);
           const smoothScroll = Math.min(targetScrollTop, maxScroll);
@@ -1029,14 +1030,27 @@ export default function SheetMusicViewer({
             // Track current system for indicator positioning
             currentSystemRef.current = Math.floor(smoothScroll / systemHeight);
           }
-        } else if (!lastVisibleNoteCompleted) {
-          // Reset scroll pending flag when we're still on visible notes
+        } else if (!lastVisibleMeasureCompleted) {
+          // Reset scroll pending flag when we're still on visible measures
           scrollPendingRef.current = false;
+          
+          // Smooth scroll to current system during measure
+          const currentSystem = Math.floor(currentMeasure / measuresPerSystem);
+          const targetScrollTop = currentSystem * systemHeight;
+          const maxScroll = Math.max(0, canvasHeight - container.clientHeight);
+          
+          const currentScroll = container.scrollTop;
+          const scrollDiff = targetScrollTop - currentScroll;
+          const scrollStep = scrollDiff * 0.1;
+          const newScrollTop = Math.min(maxScroll, currentScroll + scrollStep);
+          container.scrollTop = newScrollTop;
+          scrollPositionRef.current = newScrollTop;
+          currentSystemRef.current = Math.floor(newScrollTop / systemHeight);
         }
       } else {
-        // No visible notes - smooth scroll to follow ticker
-        const estimatedSystem = Math.floor((elapsedSeconds / totalDuration) * (canvasHeight / systemHeight));
-        const targetScrollTop = estimatedSystem * systemHeight;
+        // No visible measures - smooth scroll to follow ticker
+        const currentSystem = Math.floor(currentMeasure / measuresPerSystem);
+        const targetScrollTop = currentSystem * systemHeight;
         const maxScroll = Math.max(0, canvasHeight - container.clientHeight);
         
         const currentScroll = container.scrollTop;
