@@ -21,6 +21,7 @@ interface SheetMusicViewerProps {
   metronomeEnabled?: boolean;
   recordingStartTime?: number | null;
   notationData?: MusicPiece["notationData"]; // Structured notation if available
+  feedbackMode?: "calm" | "practice"; // Feedback intensity mode
   selectedPiece?: MusicPiece | null; // Pass selected piece to check if it's a starter song
 }
 
@@ -35,6 +36,7 @@ export default function SheetMusicViewer({
   metronomeEnabled = false,
   recordingStartTime = null,
   notationData,
+  feedbackMode = "calm",
   selectedPiece = null,
 }: SheetMusicViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -55,6 +57,8 @@ export default function SheetMusicViewer({
   const scrollAnimationRef = useRef<number | null>(null);
   const lastScrollTimeRef = useRef<number>(0);
   const [playheadPosition, setPlayheadPosition] = useState<number>(0); // 0-100% across canvas width
+  const currentScaleRef = useRef<number>(2.0); // Track current canvas scale for note sizing
+  const currentSystemRef = useRef<number>(0); // Track current system (staff) being played
   
   // Determine scroll mode: Mode A (structured) or Mode B (measure-based)
   const hasStructuredNotation = !!notationData && notationData.measures.length > 0;
@@ -73,50 +77,110 @@ export default function SheetMusicViewer({
   }, [loading, canvasRef.current?.height]);
 
   // Draw neutral positional guidance during recording (calm mode)
+  // Draws a note-sized indicator that matches the visual scale of sheet music notes
+  // Philosophy: Guidance-first, not judgment. Shows "where you are" not "how you're doing"
   const drawLiveGuidance = useCallback((
     context: CanvasRenderingContext2D,
     width: number,
     height: number,
-    currentPosition: number
+    currentPosition: number,
+    scale: number
   ) => {
     if (!isRecording || feedback.length > 0) return; // Only show during live recording, not after feedback
 
-    // Draw a soft, neutral highlight for current position
-    // Use a subtle blue-gray color for guidance, not judgment
-    const guidanceColor = "rgba(100, 116, 139, 0.15)"; // Soft slate blue
-    const playheadColor = "rgba(100, 116, 139, 0.4)"; // Slightly more visible playhead
+    // CALM MODE: Minimal, neutral positional guidance
+    // No correctness indicators, no color changes, no flashing
+    // Just a gentle "you are here" marker
     
-    // Draw playhead line (vertical line showing current position)
+    // Calculate note head size based on sheet music scale
+    // Typical note head in printed music: ~3-4mm at 100% zoom
+    // Scale with zoom: base size * scale factor
+    const baseNoteSize = 3.5; // Base size in pixels at 1x zoom (matches typical note head)
+    const noteHeadRadius = Math.max(1.5, (baseNoteSize * scale) / 2); // Radius scales with zoom, min 1.5px
+    
+    // Calculate horizontal position (0-100% across canvas width)
     const playheadX = (currentPosition / 100) * width;
-    context.strokeStyle = playheadColor;
-    context.lineWidth = 2;
-    context.setLineDash([]);
-    context.beginPath();
-    context.moveTo(playheadX, 0);
-    context.lineTo(playheadX, height);
-    context.stroke();
-
-    // Draw subtle highlight around current area (wider highlight)
-    const highlightWidth = width * 0.1; // 10% of width
-    context.fillStyle = guidanceColor;
-    context.fillRect(
-      Math.max(0, playheadX - highlightWidth / 2),
-      0,
-      highlightWidth,
-      height
-    );
-  }, [isRecording, feedback.length]);
+    
+    // Calculate vertical position: approximate staff line positions
+    const systemsPerPage = Math.ceil(height / systemHeightRef.current) || 4;
+    const systemHeight = height / systemsPerPage;
+    
+    // Draw indicator on the current active system (where music is being played)
+    const activeSystem = Math.min(currentSystemRef.current, systemsPerPage - 1);
+    const systemTop = activeSystem * systemHeight;
+    const systemBottom = (activeSystem + 1) * systemHeight;
+    const staffCenterY = systemTop + (systemBottom - systemTop) * 0.5; // Middle of system
+    
+    // Only draw if system is in visible area and position is valid
+    if (staffCenterY >= 0 && staffCenterY <= height && playheadX >= 0 && playheadX <= width) {
+      if (feedbackMode === "calm") {
+        // CALM MODE: Ultra-subtle, neutral guidance
+        // Single soft color, very low opacity, no borders, no animations
+        // Feels like a patient teacher pointing, not a game marker
+        const indicatorColor = "rgba(120, 130, 145, 0.3)"; // Soft slate gray, 30% opacity (slightly more visible)
+        
+        context.save();
+        context.globalAlpha = 0.3; // Low opacity for subtlety
+        context.fillStyle = indicatorColor;
+        
+        // Draw a small filled circle (note head size) - like a gentle cursor
+        // This is orientation only, not judgment
+        context.beginPath();
+        context.arc(playheadX, staffCenterY, noteHeadRadius, 0, Math.PI * 2);
+        context.fill();
+        
+        // Draw a very subtle vertical guide line (like an editor cursor)
+        // Short line - just enough to show alignment
+        const guideLineHeight = systemHeight * 0.25; // 25% of system height
+        context.strokeStyle = indicatorColor;
+        context.lineWidth = Math.max(0.5, scale * 0.2); // Very thin, scales with zoom
+        context.beginPath();
+        context.moveTo(playheadX, staffCenterY - guideLineHeight / 2);
+        context.lineTo(playheadX, staffCenterY + guideLineHeight / 2);
+        context.stroke();
+        
+        context.restore();
+      } else if (feedbackMode === "practice") {
+        // PRACTICE MODE: Slightly more visible, but still guidance-first
+        // Limited bar-level feedback (delayed) - not instant note-by-note
+        const indicatorColor = "rgba(100, 116, 139, 0.4)"; // Slightly more visible
+        
+        context.save();
+        context.globalAlpha = 0.4;
+        context.fillStyle = indicatorColor;
+        
+        // Draw indicator circle
+        context.beginPath();
+        context.arc(playheadX, staffCenterY, noteHeadRadius * 1.2, 0, Math.PI * 2);
+        context.fill();
+        
+        // Draw guide line
+        const guideLineHeight = systemHeight * 0.3;
+        context.strokeStyle = indicatorColor;
+        context.lineWidth = Math.max(0.6, scale * 0.25);
+        context.beginPath();
+        context.moveTo(playheadX, staffCenterY - guideLineHeight / 2);
+        context.lineTo(playheadX, staffCenterY + guideLineHeight / 2);
+        context.stroke();
+        
+        context.restore();
+      }
+    }
+  }, [isRecording, feedback.length, feedbackMode]);
 
   // Draw detailed feedback after performance (post-performance analysis)
+  // This is where learning and correction happen - after the student finishes playing
+  // Philosophy: Supportive, clear, teacher-like feedback
   const drawFeedback = useCallback((
     context: CanvasRenderingContext2D,
     width: number,
     height: number
   ) => {
     // Only show feedback after recording is complete
+    // Never show during live performance - that's when guidance happens
     if (feedback.length === 0 || isRecording) return;
 
-    // Group feedback by bar
+    // Group feedback by bar for measure-level insights
     const feedbackByBar = feedback.reduce((acc, f) => {
       if (!acc[f.bar]) acc[f.bar] = [];
       acc[f.bar].push(f);
@@ -124,6 +188,7 @@ export default function SheetMusicViewer({
     }, {} as Record<number, NoteFeedback[]>);
 
     // Draw colored overlays for each bar
+    // Colors are supportive, not harsh - like a teacher's gentle feedback
     Object.entries(feedbackByBar).forEach(([barStr, notes]) => {
       const bar = parseInt(barStr);
       const barWidth = width / Math.max(Object.keys(feedbackByBar).length, 1);
@@ -137,19 +202,25 @@ export default function SheetMusicViewer({
         return worst;
       }, "correct" as NoteFeedback["accuracy"]);
 
+      // Supportive color palette - clear but not alarming
+      // Green: "Great work!" Yellow: "Almost there!" Red: "Let's practice this"
       const colors = {
-        correct: "rgba(15, 123, 15, 0.2)",
-        slightly_off: "rgba(217, 119, 6, 0.2)",
-        wrong: "rgba(220, 38, 38, 0.2)",
+        correct: "rgba(34, 197, 94, 0.15)", // Softer green - encouraging
+        slightly_off: "rgba(234, 179, 8, 0.15)", // Softer yellow - supportive
+        wrong: "rgba(239, 68, 68, 0.12)", // Softer red - gentle guidance
       };
 
+      // Draw subtle overlay - not overwhelming
       context.fillStyle = colors[worstAccuracy];
       context.fillRect(x, 0, barWidth, height);
 
-      // Draw bar number
-      context.fillStyle = "#37352f";
-      context.font = "16px sans-serif";
-      context.fillText(`Bar ${bar}`, x + 10, 30);
+      // Draw bar number with gentle styling
+      // Only show for bars that need attention (not perfect bars)
+      if (worstAccuracy !== "correct") {
+        context.fillStyle = "rgba(55, 53, 47, 0.6)"; // Soft dark gray
+        context.font = "14px sans-serif";
+        context.fillText(`Measure ${bar}`, x + 8, 24);
+      }
     });
   }, [feedback, isRecording]);
 
@@ -215,6 +286,7 @@ export default function SheetMusicViewer({
 
       canvas.height = viewport.height;
       canvas.width = viewport.width;
+      currentScaleRef.current = scale; // Store scale for note sizing
 
       const context = canvas.getContext("2d");
       if (!context) {
@@ -233,8 +305,8 @@ export default function SheetMusicViewer({
 
       // Draw live guidance during recording OR feedback after recording
       if (isRecording && feedback.length === 0) {
-        drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition);
-      } else {
+        drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition, scale);
+      } else if (feedback.length > 0 && !isRecording) {
         drawFeedback(context, canvas.width, canvas.height);
       }
       
@@ -290,6 +362,7 @@ export default function SheetMusicViewer({
 
         canvas.width = img.width * scale;
         canvas.height = img.height * scale;
+        currentScaleRef.current = scale; // Store scale for note sizing
 
         const context = canvas.getContext("2d");
         if (!context) {
@@ -303,12 +376,12 @@ export default function SheetMusicViewer({
         
         context.drawImage(img, 0, 0, canvas.width, canvas.height);
         
-        // Draw live guidance during recording OR feedback after recording
-        if (isRecording && feedback.length === 0) {
-          drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition);
-        } else {
-          drawFeedback(context, canvas.width, canvas.height);
-        }
+      // Draw live guidance during recording OR feedback after recording
+      if (isRecording && feedback.length === 0) {
+        drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition, scale);
+      } else if (feedback.length > 0 && !isRecording) {
+        drawFeedback(context, canvas.width, canvas.height);
+      }
         canvasHeightRef.current = canvas.height;
         systemHeightRef.current = Math.max(200, canvas.height / 5);
         setLoading(false);
@@ -326,7 +399,7 @@ export default function SheetMusicViewer({
       setError("RENDER_ERROR");
       setLoading(false);
     }
-  }, [fileUrl, zoom, fitToWidth, drawFeedback]);
+  }, [fileUrl, zoom, fitToWidth, drawFeedback, drawLiveGuidance, isRecording, feedback.length, playheadPosition]);
 
   useEffect(() => {
     if (!fileUrl) {
@@ -384,6 +457,7 @@ export default function SheetMusicViewer({
   useEffect(() => {
     if (!autoScrollEnabled) {
       setPlayheadPosition(0);
+      currentSystemRef.current = 0;
     }
   }, [autoScrollEnabled]);
 
@@ -394,6 +468,7 @@ export default function SheetMusicViewer({
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
     if (!context) return;
+    const scale = currentScaleRef.current;
 
     // Redraw the base content (PDF or image) and then overlay live guidance
     const redraw = async () => {
@@ -401,6 +476,7 @@ export default function SheetMusicViewer({
         // Get current viewport scale
         const currentScale = canvas.width / pdfPageRef.current.view[2];
         const viewport = pdfPageRef.current.getViewport({ scale: currentScale });
+        currentScaleRef.current = currentScale;
         
         // Clear and redraw PDF
         context.clearRect(0, 0, canvas.width, canvas.height);
@@ -409,20 +485,32 @@ export default function SheetMusicViewer({
           viewport: viewport,
         }).promise;
         
-        // Overlay live guidance
-        drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition);
+        // Overlay live guidance with proper scale (only during recording)
+        if (isRecording && feedback.length === 0) {
+          drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition, currentScale);
+        } else if (feedback.length > 0 && !isRecording) {
+          drawFeedback(context, canvas.width, canvas.height);
+        }
       } else if (fileType === "image" && imageRef.current) {
+        // Calculate scale from canvas/image dimensions
+        const imageScale = canvas.width / imageRef.current.width;
+        currentScaleRef.current = imageScale;
+        
         // Clear and redraw image
         context.clearRect(0, 0, canvas.width, canvas.height);
         context.drawImage(imageRef.current, 0, 0, canvas.width, canvas.height);
         
-        // Overlay live guidance
-        drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition);
+        // Overlay live guidance with proper scale (only during recording)
+        if (isRecording && feedback.length === 0) {
+          drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition, imageScale);
+        } else if (feedback.length > 0 && !isRecording) {
+          drawFeedback(context, canvas.width, canvas.height);
+        }
       }
     };
 
     redraw();
-  }, [playheadPosition, isRecording, feedback.length, loading, fileType, drawLiveGuidance]);
+  }, [playheadPosition, isRecording, feedback.length, loading, fileType, drawLiveGuidance, drawFeedback]);
   
   // Auto-scroll based on tempo and elapsed time - Rhythm-aware
   useEffect(() => {
@@ -550,6 +638,9 @@ export default function SheetMusicViewer({
       const overallProgress = totalSystems > 0 ? (targetSystem + progressInSystem) / totalSystems : 0;
       const playheadPercent = Math.min(100, Math.max(0, overallProgress * 100));
       setPlayheadPosition(playheadPercent);
+      
+      // Track current system for indicator positioning
+      currentSystemRef.current = targetSystem;
       
       // Smooth scroll to target position
       if (targetScrollTop <= maxScroll) {
@@ -738,18 +829,6 @@ export default function SheetMusicViewer({
         </div>
       )}
       
-      {/* Playhead indicator - moves left-to-right during recording */}
-      {autoScrollEnabled && canvasRef.current && !loading && (
-        <div
-          className="absolute top-0 z-20 h-full w-0.5 bg-blue-500 transition-all duration-100"
-          style={{
-            left: `${playheadPosition}%`,
-            transform: 'translateX(-50%)',
-            pointerEvents: 'none',
-            boxShadow: '0 0 4px rgba(59, 130, 246, 0.8)',
-          }}
-        />
-      )}
       
       <canvas
         ref={canvasRef}

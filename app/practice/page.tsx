@@ -259,8 +259,9 @@ export default function PracticePage() {
 
           {/* Practice Mode Selector */}
           {selectedPiece && (
-            <div className="border-b border-border bg-background px-6 py-3">
+            <div className="border-b border-border bg-background px-6 py-4">
               <div className="mx-auto max-w-4xl space-y-3">
+                <h3 className="text-sm font-semibold text-foreground mb-2">Practice Settings</h3>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-medium text-muted-foreground">Practice Mode:</span>
                   <div className="flex gap-2">
@@ -290,11 +291,11 @@ export default function PracticePage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-muted-foreground">Feedback:</span>
+                  <span className="text-sm font-medium text-foreground">Live Feedback Mode:</span>
                   <div className="flex gap-2">
                     {[
-                      { value: "calm", label: "Calm (minimal)" },
-                      { value: "practice", label: "Practice (detailed)" },
+                      { value: "calm", label: "Calm", description: "Minimal guidance" },
+                      { value: "practice", label: "Practice", description: "More visible" },
                     ].map((mode) => {
                       const isActive = feedbackMode === mode.value;
                       return (
@@ -302,13 +303,16 @@ export default function PracticePage() {
                           key={mode.value}
                           onClick={() => setFeedbackMode(mode.value as "calm" | "practice")}
                           disabled={isRecording || countdown !== null}
-                          className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                          className={`flex flex-col items-start rounded-lg px-4 py-2 text-xs font-medium transition-colors border-2 ${
                             isActive
-                              ? "bg-blue-600 text-white"
-                              : "bg-accent text-foreground hover:bg-accent/80"
+                              ? "bg-blue-600 text-white border-blue-700"
+                              : "bg-accent text-foreground hover:bg-accent/80 border-border"
                           } disabled:opacity-50`}
                         >
-                          {mode.label}
+                          <span className="font-semibold">{mode.label}</span>
+                          <span className={`text-[10px] ${isActive ? "text-blue-100" : "text-muted-foreground"}`}>
+                            {mode.description}
+                          </span>
                         </button>
                       );
                     })}
@@ -323,7 +327,12 @@ export default function PracticePage() {
                 )}
                 {feedbackMode === "calm" && (
                   <p className="text-xs text-muted-foreground">
-                    Calm mode shows minimal feedback during playing. Detailed analysis appears after you finish.
+                    Calm mode: Minimal guidance during playing. Focus on your music. Detailed feedback appears after you finish.
+                  </p>
+                )}
+                {feedbackMode === "practice" && (
+                  <p className="text-xs text-muted-foreground">
+                    Practice mode: Limited bar-level feedback (delayed). Still focuses on guidance, not instant judgment.
                   </p>
                 )}
               </div>
@@ -349,6 +358,7 @@ export default function PracticePage() {
                 fileType={fileType}
                 isRecording={isRecording}
                 recordingStartTime={recordingStartTime}
+                feedbackMode={feedbackMode}
               />
             ) : (
               <div className="flex h-full items-center justify-center">
