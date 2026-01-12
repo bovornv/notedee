@@ -567,6 +567,11 @@ export default function MainPage() {
       })()
     : [];
 
+  // Guard: ensure selectedPiece exists before rendering practice interface
+  if (!selectedPiece) {
+    return null;
+  }
+
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
       <Metronome />
