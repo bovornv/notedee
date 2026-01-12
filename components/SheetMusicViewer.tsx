@@ -220,7 +220,7 @@ export default function SheetMusicViewer({
   }, []);
 
   // Draw STABLE ticker - anchored to canvas coordinates, never jumps
-  // Updates only when playheadPosition changes (beat boundaries)
+  // Updates smoothly but synchronized to beat boundaries
   // Single coordinate system: canvas coordinates only
   const drawLiveGuidance = useCallback((
     context: CanvasRenderingContext2D,
@@ -239,7 +239,7 @@ export default function SheetMusicViewer({
     const musicFrameWidth = musicFrame.right - musicFrame.left;
     
     // Calculate ticker position from playheadPosition (0-100%)
-    // This position is set only on beat boundaries, preventing jitter
+    // Position updates smoothly but is driven by beat-synchronized timing
     const positionInFrame = Math.max(0, Math.min(100, currentPosition));
     const playheadX = musicFrame.left + (positionInFrame / 100) * musicFrameWidth;
     
@@ -291,7 +291,7 @@ export default function SheetMusicViewer({
       
       context.restore();
     }
-  }, [isRecording, feedback.length, feedbackMode]);
+  }, [isRecording, feedback.length, feedbackMode, detectMusicFrame]);
 
   // Draw measure boundary lines ONLY when we have proper structured notation data
   // Hide boundaries for uploaded PDFs/images without parsed notation data
@@ -978,25 +978,30 @@ export default function SheetMusicViewer({
       const musicFrame = getStableMusicFrame();
       musicFrameRef.current = musicFrame;
       
-      // Calculate ticker position based on beat progress (beat-by-beat, no interpolation)
-      const beatProgress = Math.min(1, Math.max(0, currentBeat / totalBeats));
+      // Calculate ticker position based on beat progress
+      // Use smooth interpolation between beats for visual continuity (but update only on beat boundaries)
+      const currentBeatExact = elapsedSeconds / secondsPerBeat;
+      const beatProgress = Math.min(1, Math.max(0, currentBeatExact / totalBeats));
       const musicFrameWidth = musicFrame.right - musicFrame.left;
+      
+      // Calculate position with smooth interpolation for visual continuity
+      // But the underlying beat count only updates on beat boundaries
       const tickerX = musicFrame.left + (beatProgress * musicFrameWidth);
       
       // SAFETY: Prevent jumps - check if position changed dramatically
       if (lastTickerXRef.current >= 0) {
-        const jumpThreshold = musicFrameWidth * 0.1; // 10% of frame width
+        const jumpThreshold = musicFrameWidth * 0.15; // 15% of frame width
         const positionDiff = Math.abs(tickerX - lastTickerXRef.current);
         
         if (positionDiff > jumpThreshold && currentBeat > 0) {
-          // Suspicious jump detected - use previous position + small increment
-          const safeIncrement = musicFrameWidth / totalBeats;
+          // Suspicious jump detected - use safe increment
+          const safeIncrement = (musicFrameWidth / totalBeats) * 1.5; // Slightly larger increment for smoothness
           const safeTickerX = Math.min(musicFrame.right, lastTickerXRef.current + safeIncrement);
           lastTickerXRef.current = safeTickerX;
           const safeProgress = ((safeTickerX - musicFrame.left) / musicFrameWidth) * 100;
           setPlayheadPosition(Math.max(0, Math.min(100, safeProgress)));
         } else {
-          // Normal progression - update position
+          // Normal progression - update position smoothly
           lastTickerXRef.current = tickerX;
           const playheadPercent = ((tickerX - musicFrame.left) / musicFrameWidth) * 100;
           setPlayheadPosition(Math.max(0, Math.min(100, playheadPercent)));
