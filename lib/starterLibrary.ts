@@ -12,6 +12,7 @@ export const STARTER_VIOLIN_LIBRARY: MusicPiece[] = [
     composer: "Traditional",
     type: "public_domain",
     fileUrl: "/sheet-music/mary-had-a-little-lamb.pdf",
+    musicXMLUrl: "/musicxml/mary-had-a-little-lamb.xml", // MusicXML is the source of truth
     difficulty: 1, // ⭐
   },
   {
@@ -20,6 +21,7 @@ export const STARTER_VIOLIN_LIBRARY: MusicPiece[] = [
     composer: "Traditional",
     type: "public_domain",
     fileUrl: "/sheet-music/hot-cross-buns.pdf",
+    musicXMLUrl: "/musicxml/hot-cross-buns.xml",
     difficulty: 1, // ⭐
   },
   {
@@ -28,6 +30,7 @@ export const STARTER_VIOLIN_LIBRARY: MusicPiece[] = [
     composer: "Traditional",
     type: "public_domain",
     fileUrl: "/sheet-music/twinkle-twinkle-little-star.pdf",
+    musicXMLUrl: "/musicxml/twinkle-twinkle-little-star.xml",
     difficulty: 1, // ⭐
   },
   {
@@ -36,6 +39,7 @@ export const STARTER_VIOLIN_LIBRARY: MusicPiece[] = [
     composer: "Traditional",
     type: "public_domain",
     fileUrl: "/sheet-music/lightly-row.pdf",
+    musicXMLUrl: "/musicxml/lightly-row.xml",
     difficulty: 2, // ⭐⭐
   },
   {
@@ -44,6 +48,7 @@ export const STARTER_VIOLIN_LIBRARY: MusicPiece[] = [
     composer: "Traditional",
     type: "public_domain",
     fileUrl: "/sheet-music/go-tell-aunt-rhody.pdf",
+    musicXMLUrl: "/musicxml/go-tell-aunt-rhody.xml",
     difficulty: 2, // ⭐⭐
   },
   {
@@ -52,6 +57,7 @@ export const STARTER_VIOLIN_LIBRARY: MusicPiece[] = [
     composer: "Ludwig van Beethoven",
     type: "public_domain",
     fileUrl: "/sheet-music/ode-to-joy.pdf",
+    musicXMLUrl: "/musicxml/ode-to-joy.xml",
     difficulty: 2, // ⭐⭐
   },
   {
@@ -60,6 +66,7 @@ export const STARTER_VIOLIN_LIBRARY: MusicPiece[] = [
     composer: "Traditional",
     type: "public_domain",
     fileUrl: "/sheet-music/long-long-ago.pdf",
+    musicXMLUrl: "/musicxml/long-long-ago.xml",
     difficulty: 2, // ⭐⭐
   },
   {
@@ -68,6 +75,7 @@ export const STARTER_VIOLIN_LIBRARY: MusicPiece[] = [
     composer: "J.S. Bach",
     type: "public_domain",
     fileUrl: "/sheet-music/minuet-in-g.pdf",
+    musicXMLUrl: "/musicxml/minuet-in-g.xml",
     difficulty: 3, // ⭐⭐⭐
   },
   {
@@ -76,6 +84,7 @@ export const STARTER_VIOLIN_LIBRARY: MusicPiece[] = [
     composer: "Traditional",
     type: "public_domain",
     fileUrl: "/sheet-music/allegretto.pdf",
+    musicXMLUrl: "/musicxml/allegretto.xml",
     difficulty: 2, // ⭐⭐
   },
   {
@@ -84,6 +93,7 @@ export const STARTER_VIOLIN_LIBRARY: MusicPiece[] = [
     composer: "Traditional",
     type: "public_domain",
     fileUrl: "/sheet-music/song-of-the-wind.pdf",
+    musicXMLUrl: "/musicxml/song-of-the-wind.xml",
     difficulty: 3, // ⭐⭐⭐
   },
 ];

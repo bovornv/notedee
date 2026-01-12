@@ -1,26 +1,78 @@
 import { MusicPiece } from "@/types";
+import { MusicXMLNotation } from "@/types/musicxml";
+import { loadPieceMusicXML } from "./musicxmlLoader";
 
 /**
- * Extract expected notes from notation data for audio analysis
- * This is a simplified parser - in production, this would integrate with
- * actual sheet music parsing libraries (e.g., MusicXML, MIDI, or OCR)
+ * Extract expected notes from MusicXML (single source of truth)
+ * Falls back to notationData or default notes if MusicXML not available
  */
-export function extractExpectedNotes(
+export async function extractExpectedNotes(
   piece: MusicPiece | null,
   tempo: number,
   maxMeasures?: number
-): Array<{ bar: number; noteIndex: number; note: string; time: number }> {
+): Promise<Array<{ bar: number; noteIndex: number; note: string; time: number; pitch?: string; duration?: number; staffLine?: number }>> {
   if (!piece) {
     return getDefaultExpectedNotes(maxMeasures || 10);
   }
 
-  // If piece has structured notation data, use it
+  // CRITICAL: MusicXML is the single source of truth
+  // Try to load MusicXML first
+  const musicXML = await loadPieceMusicXML(piece);
+  if (musicXML) {
+    return extractNotesFromMusicXML(musicXML, tempo, maxMeasures);
+  }
+
+  // Fallback: If piece has structured notation data, use it
+  // (This is for backward compatibility or user uploads without MusicXML)
   if (piece.notationData) {
     return extractNotesFromNotationData(piece.notationData, tempo, maxMeasures);
   }
 
-  // Fallback to default notes (for user uploads without notation data)
+  // Final fallback: default notes (for user uploads without notation data)
   return getDefaultExpectedNotes(maxMeasures || 10);
+}
+
+/**
+ * Extract notes from MusicXML (single source of truth)
+ * This provides precise pitch, timing, and measure information
+ */
+function extractNotesFromMusicXML(
+  musicXML: MusicXMLNotation,
+  tempo: number,
+  maxMeasures?: number
+): Array<{ bar: number; noteIndex: number; note: string; time: number; pitch: string; duration: number; staffLine: number }> {
+  const secondsPerBeat = 60 / tempo;
+  const measuresToProcess = maxMeasures 
+    ? musicXML.measures.slice(0, maxMeasures)
+    : musicXML.measures;
+  
+  const expectedNotes: Array<{ bar: number; noteIndex: number; note: string; time: number; pitch: string; duration: number; staffLine: number }> = [];
+  
+  measuresToProcess.forEach((measure) => {
+    // Sort notes by beat position within measure for correct indexing
+    const sortedNotes = [...measure.notes].sort((a, b) => {
+      const aBeatInMeasure = a.beatPosition - measure.startBeat;
+      const bBeatInMeasure = b.beatPosition - measure.startBeat;
+      return aBeatInMeasure - bBeatInMeasure;
+    });
+    
+    sortedNotes.forEach((note, noteIndex) => {
+      const timeInSeconds = note.beatPosition * secondsPerBeat;
+      const durationInSeconds = note.duration * secondsPerBeat;
+      
+      expectedNotes.push({
+        bar: measure.measureNumber,
+        noteIndex, // Index within measure (sorted by beat position)
+        note: note.pitch, // Use actual pitch from MusicXML (e.g., "C4", "A#5")
+        time: timeInSeconds,
+        pitch: note.pitch, // Explicit pitch field
+        duration: durationInSeconds, // Duration in seconds
+        staffLine: note.staffIndex, // Staff/system index for rendering
+      });
+    });
+  });
+  
+  return expectedNotes;
 }
 
 /**

@@ -83,7 +83,7 @@ export default function ExplorePage() {
           <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted" />
           <input
             type="text"
-            placeholder={language === "en" ? "Search songs..." : "ค้นหาเพลง..."}
+            placeholder={t("explore.search_placeholder", language)}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full rounded-lg border border-border bg-background py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-foreground"
@@ -96,7 +96,7 @@ export default function ExplorePage() {
         <label className="flex cursor-pointer items-center justify-center gap-3 rounded-lg border-2 border-dashed border-border bg-background px-6 py-4 transition-colors hover:bg-accent">
           <Upload className="h-5 w-5 text-foreground" />
           <span className="font-medium">
-            {language === "en" ? "Upload Your Own Sheet Music (PDF or Image)" : "อัปโหลดโน้ตเพลงของคุณเอง (PDF หรือรูปภาพ)"}
+            {t("practice.upload", language)} ({t("practice.upload_desc", language)})
           </span>
           <input
             type="file"
@@ -113,12 +113,10 @@ export default function ExplorePage() {
           <div className="col-span-full rounded-lg border border-border bg-background p-8 text-center">
             <Music className="mx-auto mb-4 h-12 w-12 text-muted" />
             <h3 className="mb-2 text-lg font-semibold">
-              {language === "en" ? "No songs found" : "ไม่พบเพลงที่ค้นหา"}
+              {t("explore.no_songs", language)}
             </h3>
             <p className="mb-4 text-sm text-muted">
-              {language === "en"
-                ? "Try a different search term or upload your own sheet music above."
-                : "ลองค้นหาด้วยคำอื่นหรืออัปโหลดโน้ตเพลงของคุณเองด้านบน"}
+              {t("explore.no_songs_desc", language)}
             </p>
           </div>
         ) : (
@@ -158,7 +156,7 @@ export default function ExplorePage() {
                 onClick={() => handleSelectPiece(piece)}
                 className="mt-auto w-full rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90"
               >
-                {language === "en" ? "Open" : "เปิด"}
+                {t("explore.open", language)}
               </button>
             </div>
           ))

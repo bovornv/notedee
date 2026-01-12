@@ -98,7 +98,7 @@ const saveToStorage = (state: ProgressState) => {
 
 const initialState = loadFromStorage();
 
-export const useProgressStore = create<ProgressState>((set, get) => ({
+export const useProgressStore = create<ProgressState>((set: any, get: any) => ({
       sessions: initialState.sessions,
       streak: initialState.streak,
       lastPracticeDate: initialState.lastPracticeDate,
@@ -106,7 +106,7 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
       practiceMode: initialState.practiceMode,
       feedbackMode: initialState.feedbackMode,
 
-      addSession: (session) => {
+      addSession: (session: PracticeSession) => {
         const state = get();
         const newSessions = [...state.sessions, session];
         const newState = { ...state, sessions: newSessions };
@@ -144,19 +144,19 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
         saveToStorage(newState);
       },
 
-      setDailyGoal: (accuracy, sessions) => {
+      setDailyGoal: (accuracy: number, sessions: number) => {
         const newState = { ...get(), dailyGoal: { targetAccuracy: accuracy, targetSessions: sessions } };
         set(newState);
         saveToStorage(newState);
       },
 
-      setPracticeMode: (mode) => {
+      setPracticeMode: (mode: "accuracy" | "rhythm" | "normal") => {
         const newState = { ...get(), practiceMode: mode };
         set(newState);
         saveToStorage(newState);
       },
 
-      setFeedbackMode: (mode) => {
+      setFeedbackMode: (mode: "calm" | "practice") => {
         const newState = { ...get(), feedbackMode: mode };
         set(newState);
         saveToStorage(newState);
@@ -166,17 +166,17 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
         const state = get();
         const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         const weekSessions = state.sessions.filter(
-          (s) => new Date(s.startedAt) >= weekAgo
+          (s: PracticeSession) => new Date(s.startedAt) >= weekAgo
         );
 
         const totalSessions = weekSessions.length;
         const averageAccuracy =
           weekSessions.length > 0
-            ? weekSessions.reduce((sum, s) => sum + s.accuracy, 0) /
+            ? weekSessions.reduce((sum: number, s: PracticeSession) => sum + s.accuracy, 0) /
               weekSessions.length
             : 0;
         const totalMinutes = weekSessions.reduce(
-          (sum, s) => sum + s.duration / 60,
+          (sum: number, s: PracticeSession) => sum + s.duration / 60,
           0
         );
 
@@ -190,7 +190,7 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
       getMostPracticedSong: () => {
         const state = get();
         const songCounts: { [key: string]: number } = {};
-        state.sessions.forEach((s) => {
+        state.sessions.forEach((s: PracticeSession) => {
           songCounts[s.pieceTitle] = (songCounts[s.pieceTitle] || 0) + 1;
         });
 
@@ -209,8 +209,8 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
         let noteAccuracy = 0;
         let totalNotes = 0;
 
-        recentSessions.forEach((session) => {
-          session.feedback.forEach((note) => {
+        recentSessions.forEach((session: PracticeSession) => {
+          session.feedback.forEach((note: NoteFeedback) => {
             totalNotes++;
             if (note.accuracy === "correct") noteAccuracy++;
             if (note.accuracy === "slightly_off") noteAccuracy += 0.5;
@@ -257,9 +257,9 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
         const recentSessions = state.sessions.slice(-10);
         const issueCounts: { [key: string]: { count: number; measures: Set<number> } } = {};
 
-        recentSessions.forEach((session) => {
-          session.feedback.forEach((note) => {
-            note.issues.forEach((issue) => {
+        recentSessions.forEach((session: PracticeSession) => {
+          session.feedback.forEach((note: NoteFeedback) => {
+            note.issues.forEach((issue: string) => {
               if (!issueCounts[issue]) {
                 issueCounts[issue] = { count: 0, measures: new Set() };
               }

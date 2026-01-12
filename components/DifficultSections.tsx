@@ -3,6 +3,8 @@
 import { NoteFeedback } from "@/types";
 import { Repeat, AlertCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useLanguageStore } from "@/store/languageStore";
+import { t } from "@/lib/translations";
 
 interface DifficultSectionsProps {
   feedback: NoteFeedback[];
@@ -11,6 +13,7 @@ interface DifficultSectionsProps {
 
 export default function DifficultSections({ feedback, pieceTitle }: DifficultSectionsProps) {
   const router = useRouter();
+  const { language } = useLanguageStore();
 
   // Identify difficult measures (measures with wrong or mostly wrong notes)
   const measureAccuracy: { [bar: number]: { correct: number; total: number } } = {};
@@ -52,11 +55,11 @@ export default function DifficultSections({ feedback, pieceTitle }: DifficultSec
       <div className="mb-3 flex items-center gap-2">
         <AlertCircle className="h-5 w-5 text-orange-600" />
         <h3 className="text-sm font-semibold text-orange-900">
-          Practice These Sections
+          {t("results.practice_sections", language)}
         </h3>
       </div>
       <p className="mb-3 text-xs text-orange-700">
-        Focus on these measures to improve your overall accuracy:
+        {t("results.focus_measures", language)}
       </p>
       <div className="space-y-2">
         {difficultMeasures.map((measure) => (
@@ -66,10 +69,10 @@ export default function DifficultSections({ feedback, pieceTitle }: DifficultSec
           >
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium text-orange-900">
-                Measure {measure.bar}
+                {t("results.measure", language)} {measure.bar}
               </span>
               <span className="text-xs text-orange-600">
-                {measure.accuracy.toFixed(0)}% accuracy
+                {measure.accuracy.toFixed(0)}% {t("results.accuracy", language)}
               </span>
             </div>
             <button
@@ -77,7 +80,7 @@ export default function DifficultSections({ feedback, pieceTitle }: DifficultSec
               className="flex items-center gap-1.5 rounded-md bg-orange-600 px-3 py-1 text-xs font-medium text-white hover:bg-orange-700"
             >
               <Repeat className="h-3 w-3" />
-              Practice
+              {t("results.practice", language)}
             </button>
           </div>
         ))}
@@ -86,7 +89,7 @@ export default function DifficultSections({ feedback, pieceTitle }: DifficultSec
         onClick={() => router.push("/practice")}
         className="mt-3 w-full rounded-md border border-orange-300 bg-white px-3 py-2 text-xs font-medium text-orange-900 hover:bg-orange-100"
       >
-        Practice Full Piece Again
+        {t("results.practice_full_piece", language)}
       </button>
     </div>
   );

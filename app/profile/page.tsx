@@ -124,14 +124,14 @@ export default function ProfilePage() {
 
         {user.nickname && (
           <div className="mb-2 text-sm">
-            <span className="text-muted">ชื่อเล่น: </span>
+            <span className="text-muted">{t("profile.nickname", language)}: </span>
             <span>{user.nickname}</span>
           </div>
         )}
 
         <div className="text-sm">
-          <span className="text-muted">เครื่องดนตรี: </span>
-          <span>ไวโอลิน</span>
+          <span className="text-muted">{t("profile.instrument", language)}: </span>
+          <span>{t("profile.violin", language)}</span>
         </div>
       </div>
 
@@ -161,7 +161,7 @@ export default function ProfilePage() {
         {user.subscriptionTier === "free" && (
           <div className="mt-4">
             <p className="mb-3 text-sm text-muted">
-              อัปเกรดเป็นสมาชิกเพื่อฝึกซ้อมได้ไม่จำกัดและรับข้อเสนอแนะแบบละเอียด
+              {t("profile.upgrade_desc", language)}
             </p>
             <button
               onClick={() => {
@@ -181,7 +181,7 @@ export default function ProfilePage() {
               className="flex items-center gap-2 rounded-lg bg-warning px-4 py-2 text-sm font-medium text-background hover:bg-warning/90 transition-colors"
             >
               <Crown className="h-4 w-4" />
-              อัปเกรดเป็นสมาชิก
+              {t("profile.upgrade_button", language)}
             </button>
           </div>
         )}
@@ -189,7 +189,7 @@ export default function ProfilePage() {
 
       {/* Language */}
       <div className="mb-6 rounded-lg border border-border bg-background p-6">
-        <h3 className="mb-4 text-lg font-semibold">ภาษา</h3>
+        <h3 className="mb-4 text-lg font-semibold">{t("profile.language", language)}</h3>
         <div className="flex gap-2">
           {(Object.keys(LANGUAGES) as Language[]).map((lang) => (
             <button

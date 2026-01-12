@@ -34,10 +34,12 @@ export interface MusicPiece {
   title: string;
   composer?: string;
   type: "public_domain" | "user_upload";
-  fileUrl: string;
+  fileUrl: string; // PDF or image URL (for display only)
   thumbnailUrl?: string;
   difficulty?: 1 | 2 | 3; // ⭐ / ⭐⭐ / ⭐⭐⭐
+  musicXMLUrl?: string; // MusicXML file URL (single source of truth for analysis)
   // Structured notation data (Mode A - precise)
+  // This is now derived from MusicXML, not PDF
   notationData?: {
     timeSignature: { numerator: number; denominator: number }; // e.g., { numerator: 4, denominator: 4 }
     measures: Array<{

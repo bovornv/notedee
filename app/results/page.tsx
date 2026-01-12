@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { usePracticeStore } from "@/store/practiceStore";
 import { useAuthStore } from "@/store/authStore";
 import { useProgressStore } from "@/store/progressStore";
+import { useLanguageStore } from "@/store/languageStore";
 import SheetMusicViewer from "@/components/SheetMusicViewer";
 import { t } from "@/lib/translations";
 import { useEffect, useState } from "react";
@@ -15,9 +16,14 @@ import PracticeTips from "@/components/PracticeTips";
 export default function ResultsPage() {
   const router = useRouter();
   const { user } = useAuthStore();
+  const { language, initialize } = useLanguageStore();
   const { selectedPiece, feedback, reset } = usePracticeStore();
   const { addSession, streak, updateStreak } = useProgressStore();
   const [sessionSaved, setSessionSaved] = useState(false);
+
+  useEffect(() => {
+    initialize();
+  }, [initialize]);
 
   useEffect(() => {
     if (!user) {
@@ -112,13 +118,13 @@ export default function ResultsPage() {
                   <div className="flex items-center gap-1.5">
                     <Flame className="h-4 w-4 text-orange-500" />
                     <span className="text-xs text-green-700">
-                      {streak} day{streak !== 1 ? "s" : ""} streak
+                      {streak} {streak !== 1 ? t("results.streaks", language) : t("results.streak", language)}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <TrendingUp className="h-4 w-4 text-blue-500" />
                     <span className="text-xs text-green-700">
-                      {accuracy.toFixed(0)}% accuracy
+                      {accuracy.toFixed(0)}% {t("results.accuracy", language)}
                     </span>
                   </div>
                 </div>
@@ -129,7 +135,7 @@ export default function ResultsPage() {
           {/* Main Issues - Teacher-like, supportive feedback */}
           {mainIssues.length > 0 && (
             <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3">
-              <p className="mb-2 text-sm font-medium text-blue-900">Let&apos;s work on:</p>
+              <p className="mb-2 text-sm font-medium text-blue-900">{t("results.lets_work_on", language)}</p>
               <ul className="list-inside list-disc space-y-1 text-sm text-blue-700">
                 {mainIssues.map((issue, idx) => (
                   <li key={idx}>{issue}</li>
@@ -148,23 +154,23 @@ export default function ResultsPage() {
             <div className="flex items-center gap-2">
               <div className="h-4 w-4 rounded-full bg-success"></div>
               <span className="text-sm">
-                Correct: {correctCount}/{totalCount}
+                {t("results.correct", language)}: {correctCount}/{totalCount}
               </span>
             </div>
             <div className="flex items-center gap-2">
               <div className="h-4 w-4 rounded-full bg-warning"></div>
               <span className="text-sm">
-                Close: {slightlyOffCount}/{totalCount}
+                {t("results.close", language)}: {slightlyOffCount}/{totalCount}
               </span>
             </div>
             <div className="flex items-center gap-2">
               <div className="h-4 w-4 rounded-full bg-error"></div>
               <span className="text-sm">
-                Wrong: {wrongCount}/{totalCount}
+                {t("results.wrong", language)}: {wrongCount}/{totalCount}
               </span>
             </div>
             <div className="ml-auto text-sm font-medium">
-              Accuracy: {accuracy.toFixed(0)}%
+              {t("results.accuracy", language)}: {accuracy.toFixed(0)}%
             </div>
           </div>
         </div>
@@ -186,7 +192,7 @@ export default function ResultsPage() {
             onClick={handleViewProgress}
             className="rounded-lg border border-border bg-background px-6 py-2 text-sm font-medium hover:bg-accent"
           >
-            View Progress
+            {t("results.view_progress", language)}
           </button>
           <button
             onClick={handlePracticeAgain}

@@ -6,9 +6,14 @@ import { NoteFeedback, MusicPiece } from "@/types";
 import { ZoomIn, ZoomOut, Maximize2, RotateCcw } from "lucide-react";
 import { isStarterSong } from "@/lib/starterLibrary";
 import { extractExpectedNotes } from "@/lib/notationParser";
+import { usePracticeStore } from "@/store/practiceStore";
+import { loadPieceMusicXML, hasMusicXMLSupport } from "@/lib/musicxmlLoader";
+import { MusicXMLNotation, RenderedNote } from "@/types/musicxml";
+import { calculateNoteBoundingBoxes } from "@/lib/musicxmlRenderer";
 
 if (typeof window !== "undefined") {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+  // Use local worker file from public directory (more reliable than CDN)
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdfjs-worker/pdf.worker.min.mjs";
 }
 
 interface SheetMusicViewerProps {
@@ -50,10 +55,14 @@ export default function SheetMusicViewer({
   const containerRef = useRef<HTMLDivElement>(null);
   const pdfPageRef = useRef<any>(null); // Store PDF page for redrawing
   const imageRef = useRef<HTMLImageElement | null>(null); // Store image for redrawing
+  const renderTaskRef = useRef<any>(null); // Track current PDF render task to cancel if needed
+  const loadingTaskRef = useRef<any>(null); // Track PDF loading task to cancel if needed
+  const isLoadingRef = useRef(false); // Prevent multiple simultaneous loads
+  const loadingStartTimeRef = useRef<number>(0); // Track when loading started to detect stuck loads
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
-  const [fitToWidth, setFitToWidth] = useState(false);
+  const [fitToWidth, setFitToWidth] = useState(true); // Default to fit-to-width for better display
   const scrollPositionRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -65,16 +74,21 @@ export default function SheetMusicViewer({
   const lastScrollTimeRef = useRef<number>(0);
   const [playheadPosition, setPlayheadPosition] = useState<number>(0); // 0-100% across canvas width
   const currentScaleRef = useRef<number>(2.0); // Track current canvas scale for note sizing
-  const currentSystemRef = useRef<number>(0); // Track current system (staff) being played
+  const currentSystemRef = useRef<number>(0); // Track current system (staff line) being played
   const measureTimestampsRef = useRef<Map<number, number>>(new Map()); // Track when measures were added for fade-in
   const musicFrameRef = useRef<{ left: number; right: number; top: number; bottom: number } | null>(null); // Track music frame bounds
   const expectedNotesRef = useRef<Array<{ bar: number; noteIndex: number; note: string; time: number }>>([]); // Track expected notes for ticker positioning
+  const musicXMLRef = useRef<MusicXMLNotation | null>(null); // MusicXML data (single source of truth)
+  const renderedNotesRef = useRef<Map<string, { x: number; y: number; width: number; height: number; centerX: number }>>(new Map()); // Note bounding boxes
   const lastVisibleNoteRef = useRef<number>(-1); // Track last visible note index for scroll control
-  const currentNoteIndexRef = useRef<number>(0); // Track current note being played
+  const currentNoteIndexRef = useRef<number>(0); // Track current note being played (note-by-note)
   const scrollPendingRef = useRef<boolean>(false); // Track if scroll is pending (waiting for last visible note to complete)
   const lastBeatRef = useRef<number>(-1); // Track last beat number to update ticker only on beat boundaries
   const layoutStableRef = useRef<boolean>(false); // Track if layout is stable (no zoom/scroll in progress)
   const lastTickerXRef = useRef<number>(-1); // Track last ticker X position to prevent jumps
+  
+  // Get current beat from metronome (single source of truth)
+  const { currentBeat } = usePracticeStore();
   
   // Determine scroll mode: Mode A (structured) or Mode B (measure-based)
   const hasStructuredNotation = !!notationData && notationData.measures.length > 0;
@@ -102,14 +116,25 @@ export default function SheetMusicViewer({
     }
   }, [loading, canvasRef.current?.height, zoom, fitToWidth]);
 
-  // Initialize expected notes when piece or notation data changes
+  // Load MusicXML when piece changes (single source of truth)
   useEffect(() => {
-    if (selectedPiece && tempo) {
-      const notes = extractExpectedNotes(selectedPiece, tempo);
-      expectedNotesRef.current = notes;
-      currentNoteIndexRef.current = 0;
-      lastVisibleNoteRef.current = -1;
-      scrollPendingRef.current = false;
+    if (selectedPiece) {
+      loadPieceMusicXML(selectedPiece).then((musicXML) => {
+        musicXMLRef.current = musicXML;
+        if (musicXML && tempo) {
+          // Extract expected notes from MusicXML
+          extractExpectedNotes(selectedPiece, tempo).then((notes) => {
+            expectedNotesRef.current = notes;
+            currentNoteIndexRef.current = 0;
+            lastVisibleNoteRef.current = -1;
+            scrollPendingRef.current = false;
+            currentSystemRef.current = 0;
+          });
+        }
+      });
+    } else {
+      musicXMLRef.current = null;
+      expectedNotesRef.current = [];
     }
   }, [selectedPiece, tempo]);
 
@@ -544,7 +569,44 @@ export default function SheetMusicViewer({
       return;
     }
 
+    // Prevent multiple simultaneous loads
+    // But if we're stuck in loading state for more than 10 seconds, allow retry
+    if (isLoadingRef.current) {
+      const timeSinceStart = Date.now() - loadingStartTimeRef.current;
+      if (timeSinceStart < 10000) {
+        return; // Still within timeout, prevent duplicate load
+      }
+      // Loading has been stuck for too long, clear and retry
+      console.warn("PDF loading appears stuck, clearing state and retrying");
+      isLoadingRef.current = false;
+      setLoading(false);
+    }
+
     try {
+      // CRITICAL: Cancel any pending render task first
+      // This is safe and prevents concurrent renders on the same canvas
+      if (renderTaskRef.current) {
+        try {
+          renderTaskRef.current.cancel();
+        } catch (e) {
+          // Ignore cancellation errors (task may already be complete)
+        }
+        renderTaskRef.current = null;
+      }
+
+      // CRITICAL: DO NOT destroy loading task here
+      // Destroying the loading task destroys the shared PDF.js worker
+      // This breaks any active render operations and causes "Worker was destroyed" errors
+      // Instead, let the loading task complete naturally or be garbage collected
+      // Only clear the reference so we can start a new load
+      if (loadingTaskRef.current) {
+        // Don't destroy - just clear reference
+        // The task will complete or be garbage collected naturally
+        loadingTaskRef.current = null;
+      }
+
+      isLoadingRef.current = true;
+      loadingStartTimeRef.current = Date.now();
       setLoading(true);
       setError(null);
 
@@ -560,6 +622,7 @@ export default function SheetMusicViewer({
           console.error("Error fetching blob:", fetchError);
           setError("FILE_NOT_FOUND");
           setLoading(false);
+          isLoadingRef.current = false;
           return;
         }
       } else {
@@ -573,48 +636,101 @@ export default function SheetMusicViewer({
         url: typeof pdfData === "string" ? pdfData : undefined,
         withCredentials: false,
         httpHeaders: {},
+        verbosity: 0, // Reduce console noise
       });
+      
+      loadingTaskRef.current = loadingTask;
+      
+      // Add progress callback for debugging
+      loadingTask.onProgress = (progress: { loaded: number; total: number }) => {
+        if (progress.total > 0) {
+          console.log(`PDF loading: ${Math.round((progress.loaded / progress.total) * 100)}%`);
+        }
+      };
       
       const pdf = await loadingTask.promise;
       const page = await pdf.getPage(1);
       pdfPageRef.current = page; // Store for redrawing
+      console.log(`PDF loaded: ${fileUrl}, page rotation: ${page.rotate || 0} degrees`);
 
+      // Get page rotation from PDF metadata
+      // PDF.js page.rotate can be 0, 90, 180, or 270
+      const pageRotation = page.rotate || 0;
+      
+      // PDFs appear to be stored upside down, so we need to rotate them 180 degrees
+      // PDF.js rotation is applied relative to the page's natural orientation
+      // If pageRotation is 0 but PDF appears upside down, we need rotation: 180
+      // If pageRotation is 180, we need rotation: 0 to cancel it (but if still upside down, try 180)
+      // Simplest: always rotate 180 degrees to fix upside-down PDFs
+      const correctedRotation = 180;
+      
       // Calculate scale based on fit-to-width or zoom
+      // Default to fit-to-width for better display
+      const baseViewport = page.getViewport({ scale: 1.0, rotation: correctedRotation });
       let scale = 2.0;
+      let targetCanvasWidth: number | null = null;
+      
       if (fitToWidth && containerRef.current) {
-        const containerWidth = containerRef.current.clientWidth - 40;
-        const viewport = page.getViewport({ scale: 1.0 });
-        scale = Math.min(containerWidth / viewport.width, 3.0);
+        targetCanvasWidth = containerRef.current.clientWidth - 40; // Account for padding
+        scale = Math.min(targetCanvasWidth / baseViewport.width, 3.0);
       } else {
         scale = 2.0 * zoom;
       }
 
-      const viewport = page.getViewport({ scale });
+      // Ensure PDF is rendered with corrected rotation (right-side up)
+      const viewport = page.getViewport({ scale, rotation: correctedRotation });
       const canvas = canvasRef.current;
       if (!canvas) {
         setError("RENDER_ERROR");
         setLoading(false);
+        isLoadingRef.current = false;
         return;
       }
 
-      canvas.height = viewport.height;
+      // Set canvas dimensions - use viewport dimensions (which match the PDF scale)
+      // Canvas will be styled with CSS to fill width if needed
       canvas.width = viewport.width;
+      canvas.height = viewport.height;
       currentScaleRef.current = scale; // Store scale for note sizing
 
       const context = canvas.getContext("2d");
       if (!context) {
         setError("RENDER_ERROR");
         setLoading(false);
+        isLoadingRef.current = false;
         return;
       }
 
       // Clear canvas before rendering
       context.clearRect(0, 0, canvas.width, canvas.height);
 
-      await page.render({
+      const renderTask = page.render({
         canvasContext: context,
         viewport: viewport,
-      }).promise;
+      });
+      
+      renderTaskRef.current = renderTask;
+      
+      // Add timeout to prevent hanging (10 seconds max for render)
+      const renderPromise = Promise.race([
+        renderTask.promise,
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Render timeout")), 10000)
+        ),
+      ]);
+      
+      try {
+        await renderPromise;
+      } catch (renderErr: any) {
+        if (renderErr.message === "Render timeout") {
+          console.error("PDF render timed out after 10 seconds");
+          renderTask.cancel();
+          throw new Error("PDF rendering timed out");
+        }
+        throw renderErr;
+      } finally {
+        renderTaskRef.current = null; // Clear after render (success or failure)
+      }
 
       // Draw live guidance during recording OR feedback after recording
       if (isRecording && feedback.length === 0) {
@@ -633,21 +749,67 @@ export default function SheetMusicViewer({
       
       setLoading(false);
       setError(null); // Clear any previous errors
+      isLoadingRef.current = false;
+      loadingStartTimeRef.current = 0;
     } catch (err: any) {
+      // Handle cancellation errors - still need to clear loading state
+      if (err.name === "RenderingCancelledException" || err.message?.includes("cancelled")) {
+        console.log("PDF rendering cancelled (expected during rapid updates)");
+        setLoading(false);
+        isLoadingRef.current = false;
+        loadingStartTimeRef.current = 0;
+        return;
+      }
+
       console.error("Error loading PDF:", err);
-      // Check if it's a file not found error
-      if (err.name === "MissingPDFException" || 
-          err.message?.includes("404") || 
-          err.message?.includes("Failed to fetch") ||
-          err.message?.includes("NetworkError") ||
-          err.message?.includes("file not found")) {
+      console.error("Error details:", {
+        name: err.name,
+        message: err.message,
+        fileUrl: fileUrl,
+        stack: err.stack,
+      });
+      
+      // Check if it's a file not found error or network error
+      const isFileNotFound = 
+        err.name === "MissingPDFException" || 
+        err.name === "InvalidPDFException" ||
+        err.name === "UnexpectedResponseException" ||
+        err.message?.includes("404") || 
+        err.message?.includes("Failed to fetch") ||
+        err.message?.includes("NetworkError") ||
+        err.message?.includes("file not found") ||
+        err.message?.includes("Unexpected server response") ||
+        err.message?.includes("Invalid PDF") ||
+        (err.message?.includes("404") && fileUrl);
+      
+      if (isFileNotFound) {
+        // For starter songs, verify file exists - this shouldn't happen
+        if (selectedPiece && isStarterSong(selectedPiece)) {
+          console.error(`CRITICAL: Starter song PDF not accessible: ${fileUrl}`);
+          console.error("This indicates a deployment or file serving issue.");
+          // Try to verify file exists by fetching it
+          try {
+            const testResponse = await fetch(fileUrl);
+            if (!testResponse.ok) {
+              console.error(`File fetch failed with status: ${testResponse.status}`);
+            } else {
+              console.warn("File exists but PDF.js cannot load it. Possible CORS or worker issue.");
+            }
+          } catch (fetchErr) {
+            console.error("File fetch test failed:", fetchErr);
+          }
+        }
         setError("FILE_NOT_FOUND");
       } else {
+        // Other errors (rendering, parsing, etc.)
+        console.error("PDF rendering error:", err);
         setError("RENDER_ERROR");
       }
       setLoading(false);
+      isLoadingRef.current = false;
+      loadingStartTimeRef.current = 0;
     }
-  }, [fileUrl, zoom, fitToWidth, drawFeedback, drawDelayedMeasureFeedback, drawLiveGuidance, drawMeasureBoundaries, feedbackMode, isRecording, playheadPosition, feedback.length, notationData, tempo]);
+  }, [fileUrl, zoom, fitToWidth, drawFeedback, drawDelayedMeasureFeedback, drawLiveGuidance, drawMeasureBoundaries, feedbackMode, isRecording, playheadPosition, feedback.length, notationData, tempo, selectedPiece]);
 
   const loadImage = useCallback(async () => {
     if (!fileUrl) {
@@ -723,10 +885,32 @@ export default function SheetMusicViewer({
   }, [fileUrl, zoom, fitToWidth, drawFeedback, drawLiveGuidance, drawDelayedMeasureFeedback, isRecording, feedback.length, playheadPosition, feedbackMode]);
 
   useEffect(() => {
+    console.log(`SheetMusicViewer: fileUrl changed to: ${fileUrl}, selectedPiece: ${selectedPiece?.title || 'none'}`);
+    
     if (!fileUrl) {
       setError("NO_FILE");
       setLoading(false);
+      // Clear PDF state when no file
+      pdfPageRef.current = null;
       return;
+    }
+
+    // CRITICAL: Clear previous PDF state when fileUrl changes
+    // This ensures we don't show the wrong PDF when switching songs
+    console.log(`Clearing PDF state and loading new file: ${fileUrl}`);
+    pdfPageRef.current = null;
+    renderTaskRef.current = null;
+    loadingTaskRef.current = null;
+    isLoadingRef.current = false;
+    loadingStartTimeRef.current = 0;
+    setError(null);
+    setLoading(true);
+    // Clear canvas
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext("2d");
+      if (ctx) {
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      }
     }
 
     if (fileType === "pdf") {
@@ -734,6 +918,31 @@ export default function SheetMusicViewer({
     } else {
       loadImage();
     }
+
+    // Cleanup: cancel any ongoing operations when component unmounts or dependencies change
+    return () => {
+      // Cancel render task (safe - prevents concurrent renders)
+      if (renderTaskRef.current) {
+        try {
+          renderTaskRef.current.cancel();
+        } catch (e) {
+          // Ignore cancellation errors (task may already be complete)
+        }
+        renderTaskRef.current = null;
+      }
+      
+      // CRITICAL: DO NOT destroy loading task in cleanup
+      // Destroying the loading task destroys the shared PDF.js worker
+      // This causes "Worker was destroyed" errors if React StrictMode remounts
+      // The loading task will complete naturally or be garbage collected
+      // Only clear the reference
+      if (loadingTaskRef.current) {
+        loadingTaskRef.current = null;
+      }
+      
+      isLoadingRef.current = false;
+      loadingStartTimeRef.current = 0;
+    };
   }, [fileType, fileUrl, loadPDF, loadImage]);
 
   // Reload when zoom or fitToWidth changes (only if file exists)
@@ -782,60 +991,81 @@ export default function SheetMusicViewer({
     }
   }, [autoScrollEnabled]);
 
-  // Continuous animation loop for fade-in effects during Practice Mode
+  // Redraw canvas when playhead position or delayed feedback changes during Practice Mode recording
+  // This replaces the continuous animation loop which was causing crashes
   useEffect(() => {
     if (!isRecording || feedbackMode !== "practice" || feedback.length > 0 || loading || !canvasRef.current) return;
     
-    let animationFrameId: number;
-    const animate = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const context = canvas.getContext("2d");
-      if (!context) return;
-      
-      // Redraw base content and overlays
-      const redraw = async () => {
-        if (fileType === "pdf" && pdfPageRef.current) {
-          const currentScale = canvas.width / pdfPageRef.current.view[2];
-          const viewport = pdfPageRef.current.getViewport({ scale: currentScale });
-          context.clearRect(0, 0, canvas.width, canvas.height);
-          await pdfPageRef.current.render({
-            canvasContext: context,
-            viewport: viewport,
-          }).promise;
-          
-          if (notationData) {
-            drawMeasureBoundaries(context, canvas.width, canvas.height, currentScale);
+    const canvas = canvasRef.current;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    const scale = currentScaleRef.current;
+
+    // Redraw the base content (PDF or image) and then overlay live guidance
+    const redraw = async () => {
+      if (fileType === "pdf" && pdfPageRef.current) {
+        // Cancel any existing render task before starting new one
+        if (renderTaskRef.current) {
+          try {
+            renderTaskRef.current.cancel();
+          } catch (e) {
+            // Ignore cancellation errors
           }
-          if (isRecording && feedback.length === 0) {
-            drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition || 1, currentScale);
-            drawDelayedMeasureFeedback(context, canvas.width, canvas.height);
-          }
-        } else if (fileType === "image" && imageRef.current) {
-          const imageScale = canvas.width / imageRef.current.width;
-          context.clearRect(0, 0, canvas.width, canvas.height);
-          context.drawImage(imageRef.current, 0, 0, canvas.width, canvas.height);
-          
-          if (notationData) {
-            drawMeasureBoundaries(context, canvas.width, canvas.height, imageScale);
-          }
-          if (isRecording && feedback.length === 0) {
-            drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition || 1, imageScale);
-            drawDelayedMeasureFeedback(context, canvas.width, canvas.height);
-          }
+          renderTaskRef.current = null;
         }
-      };
-      
-      redraw();
-      animationFrameId = requestAnimationFrame(animate);
+        
+        // Get current viewport scale - use same rotation as initial load (180 degrees to fix upside-down)
+        const correctedRotation = 180;
+        const baseViewport = pdfPageRef.current.getViewport({ scale: 1.0, rotation: correctedRotation });
+        const currentScale = canvas.width / baseViewport.width;
+        const viewport = pdfPageRef.current.getViewport({ scale: currentScale, rotation: correctedRotation });
+        currentScaleRef.current = currentScale;
+        
+        // Clear and redraw PDF
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        
+        const renderTask = pdfPageRef.current.render({
+          canvasContext: context,
+          viewport: viewport,
+        });
+        renderTaskRef.current = renderTask; // Track render task
+        await renderTask.promise;
+        renderTaskRef.current = null; // Clear after completion
+        
+        // Draw measure boundaries first (if available)
+        if (notationData) {
+          drawMeasureBoundaries(context, canvas.width, canvas.height, currentScale);
+        }
+        
+        // Overlay live guidance and delayed feedback
+        if (isRecording && feedback.length === 0) {
+          drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition || 1, currentScale);
+          drawDelayedMeasureFeedback(context, canvas.width, canvas.height);
+        }
+      } else if (fileType === "image" && imageRef.current) {
+        // Calculate scale from canvas/image dimensions
+        const imageScale = canvas.width / imageRef.current.width;
+        currentScaleRef.current = imageScale;
+        
+        // Clear and redraw image
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(imageRef.current, 0, 0, canvas.width, canvas.height);
+        
+        // Draw measure boundaries first (if available)
+        if (notationData) {
+          drawMeasureBoundaries(context, canvas.width, canvas.height, imageScale);
+        }
+        
+        // Overlay live guidance and delayed feedback
+        if (isRecording && feedback.length === 0) {
+          drawLiveGuidance(context, canvas.width, canvas.height, playheadPosition || 1, imageScale);
+          drawDelayedMeasureFeedback(context, canvas.width, canvas.height);
+        }
+      }
     };
-    
-    animationFrameId = requestAnimationFrame(animate);
-    
-    return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-    };
-  }, [isRecording, feedbackMode, feedback.length, loading, fileType, playheadPosition, delayedMeasureFeedback, analyzingMeasures, measureAnalysisErrors, drawLiveGuidance, drawDelayedMeasureFeedback]);
+
+    redraw();
+  }, [isRecording, feedbackMode, feedback.length, loading, fileType, playheadPosition, delayedMeasureFeedback, analyzingMeasures, measureAnalysisErrors, drawLiveGuidance, drawDelayedMeasureFeedback, drawMeasureBoundaries, notationData]);
 
   // Redraw canvas when playhead position changes during recording (for live guidance)
   // Note: Practice Mode is handled by the animation loop above, so this only handles Calm Mode
@@ -852,17 +1082,33 @@ export default function SheetMusicViewer({
     // This only runs for Calm Mode (Practice Mode uses the animation loop)
     const redraw = async () => {
       if (fileType === "pdf" && pdfPageRef.current) {
-        // Get current viewport scale
-        const currentScale = canvas.width / pdfPageRef.current.view[2];
-        const viewport = pdfPageRef.current.getViewport({ scale: currentScale });
+        // Cancel any existing render task before starting new one
+        if (renderTaskRef.current) {
+          try {
+            renderTaskRef.current.cancel();
+          } catch (e) {
+            // Ignore cancellation errors
+          }
+          renderTaskRef.current = null;
+        }
+        
+        // Get current viewport scale - use same rotation as initial load (180 degrees to fix upside-down)
+        const correctedRotation = 180;
+        const baseViewport = pdfPageRef.current.getViewport({ scale: 1.0, rotation: correctedRotation });
+        const currentScale = canvas.width / baseViewport.width;
+        const viewport = pdfPageRef.current.getViewport({ scale: currentScale, rotation: correctedRotation });
         currentScaleRef.current = currentScale;
         
         // Clear and redraw PDF
         context.clearRect(0, 0, canvas.width, canvas.height);
-        await pdfPageRef.current.render({
+        
+        const renderTask = pdfPageRef.current.render({
           canvasContext: context,
           viewport: viewport,
-        }).promise;
+        });
+        renderTaskRef.current = renderTask; // Track render task
+        await renderTask.promise;
+        renderTaskRef.current = null; // Clear after completion
         
         // Draw measure boundaries first (if available)
         if (notationData) {
@@ -901,42 +1147,37 @@ export default function SheetMusicViewer({
     redraw();
   }, [playheadPosition, isRecording, feedback.length, loading, fileType, drawLiveGuidance, drawFeedback, drawMeasureBoundaries, feedbackMode, notationData, tempo]);
   
-  // UNIFIED METRONOME-SYNCHRONIZED ticker and auto-scroll
-  // Metronome is the master clock - all timing derived from beat boundaries
-  // Ticker updates ONLY on beat boundaries, never jumps, always anchored to canvas coordinates
+  // MUSICXML-DRIVEN TICKER: Note-by-note movement based on MusicXML timing
+  // Ticker moves note-by-note, aligned to actual note positions from MusicXML
+  // Auto-scroll uses MusicXML system boundaries
   useEffect(() => {
-    if (!autoScrollEnabled || !containerRef.current || loading || !recordingStartTime || !metronomeEnabled) {
+    if (!isRecording || !containerRef.current || loading || !recordingStartTime) {
       if (scrollAnimationRef.current) {
         cancelAnimationFrame(scrollAnimationRef.current);
         scrollAnimationRef.current = null;
       }
       if (!isRecording) {
         setPlayheadPosition(0);
-        currentNoteIndexRef.current = 0;
-        lastVisibleNoteRef.current = -1;
-        scrollPendingRef.current = false;
         lastBeatRef.current = -1;
         lastTickerXRef.current = -1;
+        currentNoteIndexRef.current = 0;
+        currentSystemRef.current = 0;
+        scrollPendingRef.current = false;
       }
       return;
     }
 
     const container = containerRef.current;
-    const canvasHeight = canvasHeightRef.current;
-    const systemHeight = systemHeightRef.current;
-    const startTime = recordingStartTime;
+    const musicXML = musicXMLRef.current;
     const notes = expectedNotesRef.current;
+    const secondsPerBeat = 60 / tempo;
     
-    // Wait for layout to stabilize before starting ticker
-    if (!layoutStableRef.current) {
-      // Small delay to ensure canvas is rendered
-      setTimeout(() => {
-        layoutStableRef.current = true;
-      }, 100);
-      return;
+    // Debug: Log if notes are empty
+    if (notes.length === 0 && isRecording) {
+      console.log("Ticker: No notes available, using fallback positioning");
     }
-
-    // Get stable music frame bounds (recalculate from current canvas)
+    
+    // Get stable music frame bounds
     const getStableMusicFrame = () => {
       if (!canvasRef.current) {
         return detectMusicFrame(800, 600);
@@ -944,179 +1185,262 @@ export default function SheetMusicViewer({
       return detectMusicFrame(canvasRef.current.width, canvasRef.current.height);
     };
 
-    // Calculate total duration from notes or fallback
-    const secondsPerBeat = 60 / tempo;
-    const totalDuration = notes.length > 0 
-      ? notes[notes.length - 1].time + secondsPerBeat * beatsPerMeasure
-      : secondsPerBeat * beatsPerMeasure * 4;
-    const totalBeats = totalDuration / secondsPerBeat;
-
-    // Unified beat-based timing system
-    // Updates ticker ONLY on beat boundaries (not every frame)
-    const updateTickerAndScroll = () => {
-      if (!autoScrollEnabled || !container || !recordingStartTime || !canvasRef.current || !layoutStableRef.current) {
-        return;
-      }
-
-      const now = Date.now();
-      const elapsedSeconds = (now - startTime) / 1000;
-      
-      // Calculate current beat (metronome-synchronized)
-      const currentBeat = Math.floor(elapsedSeconds / secondsPerBeat);
-      
-      // Only update ticker on beat boundaries (prevent jitter)
-      if (currentBeat === lastBeatRef.current && lastBeatRef.current >= 0) {
-        // Same beat - don't update ticker position, just continue scroll animation
-        scrollAnimationRef.current = requestAnimationFrame(updateTickerAndScroll);
-        return;
+    // Find current note index based on beat position (MusicXML-driven)
+    const findCurrentNoteIndex = (beat: number): number => {
+      if (!musicXML || notes.length === 0) {
+        // If no MusicXML or notes, return 0 but allow ticker to move based on time
+        return 0;
       }
       
-      // New beat detected - update ticker
+      // Convert beat to time in seconds
+      const currentTime = beat * secondsPerBeat;
+      
+      // Find note that should be playing at this time
+      for (let i = 0; i < notes.length; i++) {
+        const note = notes[i];
+        const noteStartTime = note.time;
+        const noteEndTime = i < notes.length - 1 
+          ? notes[i + 1].time 
+          : noteStartTime + secondsPerBeat; // Default to one beat duration
+        
+        if (currentTime >= noteStartTime && currentTime < noteEndTime) {
+          return i;
+        }
+      }
+      
+      // If past all notes, return last note index
+      return Math.max(0, notes.length - 1);
+    };
+
+    // Get current system from MusicXML
+    const getCurrentSystem = (noteIndex: number): number => {
+      if (!musicXML || noteIndex < 0 || noteIndex >= notes.length) return 0;
+      
+      const note = notes[noteIndex];
+      const measure = musicXML.measures.find(m => m.measureNumber === note.bar);
+      return measure ? measure.systemIndex : 0;
+    };
+    
+    // Get rendered note bounding box for precise ticker alignment
+    // Uses MusicXML data and actual PDF layout for accurate positioning
+    const getRenderedNoteBounds = (noteIndex: number): RenderedNote | null => {
+      if (!musicXML || noteIndex < 0 || noteIndex >= notes.length || !canvasRef.current) return null;
+      
+      const note = notes[noteIndex];
+      
+      // Find matching MusicXML note by measure and pitch
+      const measure = musicXML.measures.find(m => m.measureNumber === note.bar);
+      if (!measure) return null;
+      
+      // Find note in measure (sorted by beat position)
+      const measureNotes = [...measure.notes].sort((a, b) => a.beatPosition - b.beatPosition);
+      const musicXMLNote = measureNotes.find(n => n.pitch === note.note);
+      if (!musicXMLNote) return null;
+      
+      // Get stable music frame from PDF
+      const musicFrame = getStableMusicFrame();
+      
+      // Use MusicXML renderer to calculate precise bounding box
+      const renderedNotesMap = calculateNoteBoundingBoxes(
+        musicXML,
+        {
+          width: canvasRef.current.width,
+          height: canvasRef.current.height,
+          scale: currentScaleRef.current,
+          staffSpacing: (musicFrame.bottom - musicFrame.top) / (musicXML.systems.length || 1),
+        },
+        musicFrame
+      );
+      
+      const renderedNote = renderedNotesMap.get(musicXMLNote.id);
+      if (renderedNote) {
+        // Update rendered notes cache
+        renderedNotesRef.current.set(musicXMLNote.id, renderedNote);
+        return renderedNote;
+      }
+      
+      // Fallback: Calculate position manually if renderer didn't find it
+      const musicFrameWidth = musicFrame.right - musicFrame.left;
+      const totalDuration = notes.length > 0 
+        ? notes[notes.length - 1].time + secondsPerBeat * beatsPerMeasure
+        : secondsPerBeat * beatsPerMeasure * 4;
+      
+      const noteX = calculateNotePosition(note.time, musicFrame, totalDuration);
+      const noteWidth = 20 * currentScaleRef.current; // Scale note width with zoom
+      const noteHeight = 15 * currentScaleRef.current; // Scale note height with zoom
+      
+      // Calculate system Y position
+      const systemCount = musicXML.systems.length || 1;
+      const systemHeight = (musicFrame.bottom - musicFrame.top) / systemCount;
+      const systemY = musicFrame.top + (musicXMLNote.staffIndex * systemHeight);
+      const centerY = systemY + (systemHeight / 2);
+      
+      const fallbackNote: RenderedNote = {
+        noteId: musicXMLNote.id,
+        x: noteX - noteWidth / 2,
+        y: centerY - noteHeight / 2,
+        width: noteWidth,
+        height: noteHeight,
+        centerX: noteX,
+        centerY,
+        systemIndex: musicXMLNote.staffIndex,
+      };
+      
+      // Cache fallback note
+      renderedNotesRef.current.set(musicXMLNote.id, fallbackNote);
+      return fallbackNote;
+    };
+
+    // Check if we've completed the current system (reached last note of system)
+    const isSystemComplete = (noteIndex: number): boolean => {
+      if (!musicXML || noteIndex < 0 || noteIndex >= notes.length) return false;
+      
+      const currentSystem = getCurrentSystem(noteIndex);
+      const system = musicXML.systems.find(s => s.systemIndex === currentSystem);
+      if (!system) return false;
+      
+      // Find the last note in this system
+      const systemMeasures = system.measures;
+      const systemNotes = notes.filter(note => systemMeasures.includes(note.bar));
+      if (systemNotes.length === 0) return false;
+      
+      const lastSystemNoteIndex = notes.findIndex(n => 
+        n.bar === systemNotes[systemNotes.length - 1].bar &&
+        n.noteIndex === systemNotes[systemNotes.length - 1].noteIndex
+      );
+      
+      // System is complete when we've reached or passed the last note
+      return noteIndex >= lastSystemNoteIndex;
+    };
+
+    // Initialize on first beat
+    if (lastBeatRef.current < 0 && currentBeat > 0) {
       lastBeatRef.current = currentBeat;
-      
-      // Get stable music frame (recalculate to prevent coordinate drift)
       const musicFrame = getStableMusicFrame();
       musicFrameRef.current = musicFrame;
-      
-      // Calculate ticker position based on beat progress
-      // Use smooth interpolation between beats for visual continuity (but update only on beat boundaries)
-      const currentBeatExact = elapsedSeconds / secondsPerBeat;
-      const beatProgress = Math.min(1, Math.max(0, currentBeatExact / totalBeats));
-      const musicFrameWidth = musicFrame.right - musicFrame.left;
-      
-      // Calculate position with smooth interpolation for visual continuity
-      // But the underlying beat count only updates on beat boundaries
-      const tickerX = musicFrame.left + (beatProgress * musicFrameWidth);
-      
-      // SAFETY: Prevent jumps - check if position changed dramatically
-      if (lastTickerXRef.current >= 0) {
-        const jumpThreshold = musicFrameWidth * 0.15; // 15% of frame width
-        const positionDiff = Math.abs(tickerX - lastTickerXRef.current);
-        
-        if (positionDiff > jumpThreshold && currentBeat > 0) {
-          // Suspicious jump detected - use safe increment
-          const safeIncrement = (musicFrameWidth / totalBeats) * 1.5; // Slightly larger increment for smoothness
-          const safeTickerX = Math.min(musicFrame.right, lastTickerXRef.current + safeIncrement);
-          lastTickerXRef.current = safeTickerX;
-          const safeProgress = ((safeTickerX - musicFrame.left) / musicFrameWidth) * 100;
-          setPlayheadPosition(Math.max(0, Math.min(100, safeProgress)));
-        } else {
-          // Normal progression - update position smoothly
-          lastTickerXRef.current = tickerX;
-          const playheadPercent = ((tickerX - musicFrame.left) / musicFrameWidth) * 100;
-          setPlayheadPosition(Math.max(0, Math.min(100, playheadPercent)));
-        }
+      const noteIndex = findCurrentNoteIndex(currentBeat);
+      currentNoteIndexRef.current = noteIndex;
+      currentSystemRef.current = getCurrentSystem(noteIndex);
+      setPlayheadPosition(1); // Start visible
+      if (notes.length > 0) {
+        const firstNoteX = calculateNotePosition(notes[0].time, musicFrame, notes[notes.length - 1].time + secondsPerBeat * beatsPerMeasure);
+        lastTickerXRef.current = firstNoteX;
       } else {
-        // First update - set initial position
+        lastTickerXRef.current = musicFrame.left;
+      }
+    }
+
+    // Only update on beat changes (metronome-driven)
+    if (currentBeat === lastBeatRef.current || currentBeat < 1) {
+      return;
+    }
+
+    // New beat detected - update ticker position note-by-note
+    lastBeatRef.current = currentBeat;
+    
+    const musicFrame = getStableMusicFrame();
+    musicFrameRef.current = musicFrame;
+    const musicFrameWidth = musicFrame.right - musicFrame.left;
+    
+    // Find current note index based on beat (MusicXML-driven)
+    const noteIndex = findCurrentNoteIndex(currentBeat);
+    
+    // Update ticker position - move smoothly based on beat progress
+    // Always update ticker position, even if still on same note (for smooth movement)
+    if (notes.length > 0 && noteIndex < notes.length) {
+      // Update current note index if changed
+      if (noteIndex !== currentNoteIndexRef.current) {
+        currentNoteIndexRef.current = noteIndex;
+      }
+      
+      // Get rendered note bounding box for precise alignment
+      const renderedNote = getRenderedNoteBounds(noteIndex);
+      
+      if (renderedNote) {
+        // Use centerX from rendered note for precise ticker alignment
+        lastTickerXRef.current = renderedNote.centerX;
+        
+        // Convert to percentage for playheadPosition
+        const playheadPercent = ((renderedNote.centerX - musicFrame.left) / musicFrameWidth) * 100;
+        setPlayheadPosition(Math.max(0, Math.min(100, playheadPercent)));
+        
+        // Update rendered notes map for future reference
+        renderedNotesRef.current.set(renderedNote.noteId, renderedNote);
+      } else if (notes[noteIndex]) {
+        // Fallback to calculated position if bounding box not available
+        const note = notes[noteIndex];
+        const totalDuration = notes.length > 0 
+          ? notes[notes.length - 1].time + secondsPerBeat * beatsPerMeasure
+          : secondsPerBeat * beatsPerMeasure * 4;
+        
+        const noteX = calculateNotePosition(note.time, musicFrame, totalDuration);
+        lastTickerXRef.current = noteX;
+        
+        const playheadPercent = ((noteX - musicFrame.left) / musicFrameWidth) * 100;
+        setPlayheadPosition(Math.max(0, Math.min(100, playheadPercent)));
+      } else {
+        // If no notes available, move ticker based on beat progress
+        const beatProgress = currentBeat / (beatsPerMeasure * 4); // Assume 4 measures max
+        const tickerX = musicFrame.left + (beatProgress * musicFrameWidth);
         lastTickerXRef.current = tickerX;
         const playheadPercent = ((tickerX - musicFrame.left) / musicFrameWidth) * 100;
         setPlayheadPosition(Math.max(0, Math.min(100, playheadPercent)));
       }
       
-      // Ensure ticker stays within visible music frame
-      const clampedTickerX = Math.max(musicFrame.left, Math.min(musicFrame.right, lastTickerXRef.current));
-      if (clampedTickerX !== lastTickerXRef.current) {
-        lastTickerXRef.current = clampedTickerX;
-        const clampedProgress = ((clampedTickerX - musicFrame.left) / musicFrameWidth) * 100;
-        setPlayheadPosition(Math.max(0, Math.min(100, clampedProgress)));
+      // Check if we've moved to a new system
+      const newSystem = getCurrentSystem(noteIndex);
+      if (newSystem !== currentSystemRef.current) {
+        currentSystemRef.current = newSystem;
       }
-
-      // Calculate current measure based on beats (metronome-synchronized)
-      const currentMeasure = Math.floor(currentBeat / beatsPerMeasure);
-      const beatInMeasure = currentBeat % beatsPerMeasure;
-      const progressInMeasure = beatInMeasure / beatsPerMeasure;
+    } else {
+      // No notes available - move ticker based on beat progress alone
+      const beatProgress = Math.min(1, currentBeat / (beatsPerMeasure * 4));
+      const tickerX = musicFrame.left + (beatProgress * musicFrameWidth);
+      lastTickerXRef.current = tickerX;
+      const playheadPercent = ((tickerX - musicFrame.left) / musicFrameWidth) * 100;
+      setPlayheadPosition(Math.max(0, Math.min(100, playheadPercent)));
+    }
+    
+    // AUTO-SCROLL: Only when final note of current system completes (MusicXML-driven)
+    const systemComplete = isSystemComplete(noteIndex);
+    const canvasHeight = canvasHeightRef.current;
+    const systemHeight = systemHeightRef.current;
+    
+    if (systemComplete && !scrollPendingRef.current && musicXML) {
+      scrollPendingRef.current = true;
       
-      // Determine visible measures
-      const scrollTop = container.scrollTop;
-      const viewportTop = scrollTop;
-      const viewportBottom = scrollTop + container.clientHeight;
-      const measuresPerSystem = 4;
-      const totalMeasures = Math.ceil(totalBeats / beatsPerMeasure);
+      // Scroll to next system using MusicXML system data
+      const nextSystem = currentSystemRef.current + 1;
+      const targetScrollTop = nextSystem * systemHeight;
+      const maxScroll = Math.max(0, canvasHeight - container.clientHeight);
+      const smoothScroll = Math.min(targetScrollTop, maxScroll);
       
-      // Find visible measures
-      const visibleMeasures: number[] = [];
-      for (let m = 0; m < totalMeasures; m++) {
-        const measureSystem = Math.floor(m / measuresPerSystem);
-        const measureY = measureSystem * systemHeight;
-        
-        if (measureY >= viewportTop - systemHeight && measureY <= viewportBottom + systemHeight) {
-          visibleMeasures.push(m);
-        }
+      const currentScroll = container.scrollTop;
+      const scrollDiff = smoothScroll - currentScroll;
+      
+      if (Math.abs(scrollDiff) > 10) {
+        // Smooth scroll animation
+        const scrollStep = scrollDiff * 0.2;
+        container.scrollTop = currentScroll + scrollStep;
+        scrollPositionRef.current = container.scrollTop;
       }
+    } else if (!systemComplete) {
+      scrollPendingRef.current = false;
       
-      // AUTO-SCROLL: Only trigger after last visible measure completes (beat-synchronized)
-      if (visibleMeasures.length > 0) {
-        const lastVisibleMeasure = Math.max(...visibleMeasures);
-        lastVisibleNoteRef.current = lastVisibleMeasure;
-        
-        // Measure is complete when we've moved to the next measure (beat boundary)
-        // OR when we're at the last beat of the measure (beatInMeasure === beatsPerMeasure - 1)
-        const measureComplete = currentMeasure > lastVisibleMeasure || 
-          (currentMeasure === lastVisibleMeasure && beatInMeasure === beatsPerMeasure - 1);
-        
-        if (measureComplete && !scrollPendingRef.current) {
-          scrollPendingRef.current = true;
-          
-          // Calculate target scroll position (next system)
-          const targetMeasure = Math.min(lastVisibleMeasure + 1, totalMeasures - 1);
-          const targetSystem = Math.floor(targetMeasure / measuresPerSystem);
-          const targetScrollTop = targetSystem * systemHeight;
-          const maxScroll = Math.max(0, canvasHeight - container.clientHeight);
-          const smoothScroll = Math.min(targetScrollTop, maxScroll);
-          
-          // Smooth scroll to next system (beat-synchronized)
-          const currentScroll = container.scrollTop;
-          const scrollDiff = smoothScroll - currentScroll;
-          
-          if (Math.abs(scrollDiff) > 10) {
-            const scrollStep = scrollDiff * 0.2; // Smooth scroll speed
-            container.scrollTop = currentScroll + scrollStep;
-            scrollPositionRef.current = container.scrollTop;
-            currentSystemRef.current = Math.floor(smoothScroll / systemHeight);
-          }
-        } else if (!measureComplete) {
-          scrollPendingRef.current = false;
-          
-          // Smooth scroll to current system during measure
-          const currentSystem = Math.floor(currentMeasure / measuresPerSystem);
-          const targetScrollTop = currentSystem * systemHeight;
-          const maxScroll = Math.max(0, canvasHeight - container.clientHeight);
-          
-          const currentScroll = container.scrollTop;
-          const scrollDiff = targetScrollTop - currentScroll;
-          const scrollStep = scrollDiff * 0.1;
-          const newScrollTop = Math.min(maxScroll, currentScroll + scrollStep);
-          container.scrollTop = newScrollTop;
-          scrollPositionRef.current = newScrollTop;
-          currentSystemRef.current = Math.floor(newScrollTop / systemHeight);
-        }
-      } else {
-        // No visible measures - smooth scroll to follow ticker
-        const currentSystem = Math.floor(currentMeasure / measuresPerSystem);
-        const targetScrollTop = currentSystem * systemHeight;
-        const maxScroll = Math.max(0, canvasHeight - container.clientHeight);
-        
-        const currentScroll = container.scrollTop;
-        const scrollDiff = targetScrollTop - currentScroll;
+      // Keep current system in view
+      const targetScrollTop = currentSystemRef.current * systemHeight;
+      const maxScroll = Math.max(0, canvasHeight - container.clientHeight);
+      const currentScroll = container.scrollTop;
+      const scrollDiff = targetScrollTop - currentScroll;
+      
+      if (Math.abs(scrollDiff) > 10) {
         const scrollStep = scrollDiff * 0.1;
         const newScrollTop = Math.min(maxScroll, currentScroll + scrollStep);
         container.scrollTop = newScrollTop;
         scrollPositionRef.current = newScrollTop;
-        currentSystemRef.current = Math.floor(newScrollTop / systemHeight);
       }
-
-      scrollAnimationRef.current = requestAnimationFrame(updateTickerAndScroll);
-    };
-
-    scrollAnimationRef.current = requestAnimationFrame(updateTickerAndScroll);
-
-    return () => {
-      if (scrollAnimationRef.current) {
-        cancelAnimationFrame(scrollAnimationRef.current);
-        scrollAnimationRef.current = null;
-      }
-    };
-  }, [autoScrollEnabled, tempo, timeSignature, recordingStartTime, loading, beatsPerMeasure, isRecording, metronomeEnabled, detectMusicFrame]);
+    }
+  }, [isRecording, currentBeat, tempo, beatsPerMeasure, recordingStartTime, loading, detectMusicFrame, calculateNotePosition]);
 
   const handleZoomIn = () => {
     setZoom((prev) => Math.min(2, prev + 0.25));
@@ -1150,6 +1474,7 @@ export default function SheetMusicViewer({
 
   // Starter songs are hard-bound to their PDFs - never show upload screen for them
   const isStarter = selectedPiece ? isStarterSong(selectedPiece) : false;
+  const hasMusicXML = selectedPiece ? hasMusicXMLSupport(selectedPiece) : false;
   
   // Show upload UI when no file exists - but NEVER for starter songs
   if ((error === "NO_FILE" || error === "FILE_NOT_FOUND" || !fileUrl) && !isStarter && onFileUpload) {
@@ -1230,6 +1555,34 @@ export default function SheetMusicViewer({
         height: '100%', // Explicit height
       }}
     >
+      {/* MusicXML Support Banner */}
+      {selectedPiece && !hasMusicXML && !loading && !error && (
+        <div className="sticky top-4 left-4 right-4 z-10 mx-auto mb-4 max-w-4xl rounded-lg border border-yellow-300 bg-yellow-50 px-4 py-2 text-sm text-yellow-800 shadow-sm">
+          <div className="flex items-center gap-2">
+            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+            <span>
+              <strong>View-only mode:</strong> This piece doesn&apos;t have detailed analysis support. 
+              You can view the sheet music, but detailed feedback requires supported sheet music format.
+            </span>
+          </div>
+        </div>
+      )}
+      
+      {selectedPiece && hasMusicXML && !loading && !error && (
+        <div className="sticky top-4 left-4 right-4 z-10 mx-auto mb-4 max-w-4xl rounded-lg border border-green-300 bg-green-50 px-4 py-2 text-sm text-green-800 shadow-sm">
+          <div className="flex items-center gap-2">
+            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+            <span>
+              <strong>Playable & analyzable:</strong> This piece supports detailed feedback, ticker guidance, and note-by-note analysis.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Zoom Controls - Sticky so they stay visible during scroll */}
       <div className="sticky top-4 right-4 z-10 float-right flex gap-2 rounded-lg border border-border bg-background p-2 shadow-sm">
         <button
@@ -1277,11 +1630,14 @@ export default function SheetMusicViewer({
       
       <canvas
         ref={canvasRef}
-        className="mx-auto block max-w-full"
+        className="mx-auto block"
         style={{ 
           display: loading || error ? "none" : "block", 
           minHeight: "400px",
-          visibility: loading || error ? "hidden" : "visible"
+          visibility: loading || error ? "hidden" : "visible",
+          width: fitToWidth ? "100%" : "auto",
+          maxWidth: "100%",
+          height: "auto"
         }}
       />
       

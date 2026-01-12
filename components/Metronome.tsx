@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { usePracticeStore } from "@/store/practiceStore";
 
 export default function Metronome() {
-  const { metronomeEnabled, tempo, isRecording, countdown } = usePracticeStore();
+  const { metronomeEnabled, tempo, isRecording, countdown, setCurrentBeat, currentBeat } = usePracticeStore();
   const audioContextRef = useRef<AudioContext | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const nextTickTimeRef = useRef<number>(0);
@@ -21,6 +21,10 @@ export default function Metronome() {
       if (audioContextRef.current && audioContextRef.current.state !== "closed") {
         audioContextRef.current.close();
         audioContextRef.current = null;
+      }
+      // Reset beat counter when metronome stops (only reset, don't check currentBeat to avoid dependency)
+      if (!isRecording) {
+        setCurrentBeat(0);
       }
       return;
     }
@@ -54,6 +58,13 @@ export default function Metronome() {
 
       oscillator.start(ctx.currentTime);
       oscillator.stop(ctx.currentTime + 0.1);
+
+      // CRITICAL: Emit beat event - this is the single source of truth for ticker movement
+      // Only increment beat counter during recording (not countdown)
+      // Use functional update to avoid dependency on currentBeat value
+      if (isRecording) {
+        setCurrentBeat((prev) => prev + 1);
+      }
     };
 
     // Use Web Audio API scheduling for precise timing
@@ -93,7 +104,7 @@ export default function Metronome() {
         intervalRef.current = null;
       }
     };
-  }, [shouldPlay, tempo]);
+  }, [shouldPlay, tempo, isRecording, setCurrentBeat]);
 
   return null;
 }

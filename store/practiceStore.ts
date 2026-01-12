@@ -13,6 +13,8 @@ interface PracticeState {
   timeSignature: { numerator: number; denominator: number }; // e.g., { numerator: 4, denominator: 4 }
   micPermissionDenied: boolean;
   countdown: number | null;
+  currentBeat: number; // Current beat number (incremented by metronome)
+  setCurrentBeat: (beat: number | ((prev: number) => number)) => void;
   setSelectedPiece: (piece: MusicPiece | null) => void;
   setIsRecording: (recording: boolean) => void;
   setRecordedAudio: (audio: Blob | null) => void;
@@ -40,6 +42,14 @@ export const usePracticeStore = create<PracticeState>((set) => ({
   timeSignature: { numerator: 4, denominator: 4 }, // Default 4/4 time
   micPermissionDenied: false,
   countdown: null,
+  currentBeat: 0,
+  setCurrentBeat: (beat: number | ((prev: number) => number)) => {
+    if (typeof beat === 'function') {
+      set((state) => ({ currentBeat: beat(state.currentBeat) }));
+    } else {
+      set({ currentBeat: beat });
+    }
+  },
   setSelectedPiece: (piece) => {
     set({ selectedPiece: piece });
     // If changing music, reset steps 2 and 3
@@ -75,6 +85,7 @@ export const usePracticeStore = create<PracticeState>((set) => ({
       timeSignature: { numerator: 4, denominator: 4 },
       micPermissionDenied: false,
       countdown: null,
+      currentBeat: 0,
     }),
   resetSteps2And3: () =>
     set({

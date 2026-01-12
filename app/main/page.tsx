@@ -4,8 +4,9 @@ import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import { usePracticeStore } from "@/store/practiceStore";
+import { useProgressStore } from "@/store/progressStore";
 import { useLanguageStore } from "@/store/languageStore";
-import { Play, Square, Music, X, CheckCircle2 } from "lucide-react";
+import { Play, Square, Music, X, CheckCircle2, Sparkles, Settings, ChevronRight, Upload } from "lucide-react";
 import SheetMusicViewer from "@/components/SheetMusicViewer";
 import Metronome from "@/components/Metronome";
 import MicIndicator from "@/components/MicIndicator";
@@ -15,6 +16,8 @@ import { MusicPiece } from "@/types";
 import { MIN_TEMPO, MAX_TEMPO } from "@/lib/constants";
 import { canStartSession, incrementTodaySessions, getTodaySessions } from "@/lib/sessionLimits";
 import { t } from "@/lib/translations";
+import { STARTER_VIOLIN_LIBRARY } from "@/lib/starterLibrary";
+import { getPracticeRecommendations } from "@/lib/progressInsights";
 
 export default function MainPage() {
   const router = useRouter();
@@ -44,11 +47,14 @@ export default function MainPage() {
     resetSteps2And3,
   } = usePracticeStore();
 
+  const { sessions, getWeakSpots, getMostPracticedSong, feedbackMode, setFeedbackMode, practiceMode, setPracticeMode } = useProgressStore();
+
   const [recorder] = useState(() => new AudioRecorder());
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [uploadedFileUrl, setUploadedFileUrl] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [todaySessions, setTodaySessions] = useState(0);
+  const [showAdvancedMode, setShowAdvancedMode] = useState(false);
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
   const recordingStartTimeRef = useRef<number | null>(null);
 
@@ -99,53 +105,288 @@ export default function MainPage() {
     };
   }, [storeCountdown, recorder, language, setCountdown, setIsRecording, setMicPermissionDenied]);
 
-  // If no piece selected, show selection screen
-  if (!selectedPiece) {
-    return (
-      <div className="mx-auto max-w-4xl px-6 py-8">
-        <h1 className="mb-8 text-2xl font-semibold">{t("step1.title", language)}</h1>
-        
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <button
-            onClick={() => router.push("/explore")}
-            className="flex items-center justify-center gap-3 rounded-lg border border-border bg-background px-6 py-4 text-left transition-colors hover:bg-accent"
-          >
-            <Music className="h-6 w-6 text-foreground" />
-            <div>
-              <div className="font-semibold">{t("step1.explore", language)}</div>
-              <div className="text-sm text-muted">{t("step1.explore_desc", language)}</div>
-            </div>
-          </button>
+  // Set Student Mode defaults when mode changes
+  useEffect(() => {
+    if (!showAdvancedMode) {
+      setFeedbackMode("calm");
+      setPracticeMode("normal");
+    }
+  }, [showAdvancedMode, setFeedbackMode, setPracticeMode]);
 
-          <label className="flex cursor-pointer items-center justify-center gap-3 rounded-lg border border-border bg-background px-6 py-4 text-left transition-colors hover:bg-accent">
-            <Music className="h-6 w-6 text-foreground" />
-            <div>
-              <div className="font-semibold">{t("step1.upload", language)}</div>
-              <div className="text-sm text-muted">{t("step1.upload_desc", language)}</div>
+  // Get personalized recommended songs
+  const getRecommendedSongs = () => {
+    if (sessions.length === 0) {
+      return STARTER_VIOLIN_LIBRARY.filter(s => s.difficulty === 1).slice(0, 5);
+    }
+    const mostPracticedSong = getMostPracticedSong();
+    const weakSpots = getWeakSpots();
+    const recommendation = getPracticeRecommendations(sessions, mostPracticedSong, weakSpots);
+    const recommendedSong = STARTER_VIOLIN_LIBRARY.find(s => s.title === recommendation.suggestedSong);
+    const recommendedList: MusicPiece[] = [];
+    if (recommendedSong) {
+      recommendedList.push(recommendedSong);
+    }
+    const recommendedDifficulty = recommendedSong?.difficulty || 1;
+    const similarDifficultySongs = STARTER_VIOLIN_LIBRARY
+      .filter(s => s.difficulty === recommendedDifficulty && s.id !== recommendedSong?.id)
+      .slice(0, 2);
+    recommendedList.push(...similarDifficultySongs);
+    const remaining = STARTER_VIOLIN_LIBRARY
+      .filter(s => !recommendedList.some(r => r.id === s.id))
+      .slice(0, 5 - recommendedList.length);
+    recommendedList.push(...remaining);
+    return recommendedList.slice(0, 5);
+  };
+
+  const recommendedSongs = getRecommendedSongs();
+
+  const handleSelectSong = (song: MusicPiece) => {
+    setSelectedPiece(song);
+    setShowAdvancedMode(false);
+    resetSteps2And3();
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && (file.type === "application/pdf" || file.type.startsWith("image/"))) {
+      setUploadedFile(file);
+      const fileUrl = URL.createObjectURL(file);
+      const piece: MusicPiece = {
+        id: `upload-${Date.now()}`,
+        title: file.name.replace(/\.[^/.]+$/, ""),
+        type: "user_upload",
+        fileUrl,
+      };
+      resetSteps2And3();
+      setSelectedPiece(piece);
+      setShowAdvancedMode(false);
+    } else {
+      alert(t("error.invalid_file", language));
+    }
+  };
+
+  // If no piece selected, show new selection screen
+  if (!selectedPiece && !isRecording) {
+    return (
+      <div className="flex h-[calc(100vh-4rem)] flex-col bg-gray-50">
+        <Metronome />
+        <div className="flex-1 overflow-auto">
+          <div className="mx-auto max-w-3xl px-6 py-12">
+            {/* Header */}
+            <div className="mb-12 text-center">
+              <h1 className="mb-3 text-3xl font-light text-gray-900">{t("practice.start_session", language)}</h1>
+              <p className="text-base text-gray-600">{t("practice.subtitle", language)}</p>
             </div>
-            <input
-              type="file"
-              accept=".pdf,image/*"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file && (file.type === "application/pdf" || file.type.startsWith("image/"))) {
-                  setUploadedFile(file);
-                  const fileUrl = URL.createObjectURL(file);
-                  const piece: MusicPiece = {
-                    id: `upload-${Date.now()}`,
-                    title: file.name.replace(/\.[^/.]+$/, ""),
-                    type: "user_upload",
-                    fileUrl,
-                  };
-                  resetSteps2And3();
-                  setSelectedPiece(piece);
-                } else {
-                  alert(t("error.invalid_file", language));
-                }
-              }}
-              className="hidden"
-            />
-          </label>
+
+            {/* Mode Selector */}
+            <div className="mb-10 flex justify-center gap-2">
+              <button
+                onClick={() => setShowAdvancedMode(false)}
+                className={`rounded-lg px-6 py-2.5 text-sm font-medium transition-all ${
+                  !showAdvancedMode
+                    ? "bg-blue-600 text-white shadow-md scale-105"
+                    : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Sparkles className={`h-4 w-4 ${!showAdvancedMode ? "text-white" : "text-gray-600"}`} />
+                  <span>{t("practice.student_mode", language)}</span>
+                </div>
+              </button>
+              <button
+                onClick={() => setShowAdvancedMode(true)}
+                className={`rounded-lg px-6 py-2.5 text-sm font-medium transition-all ${
+                  showAdvancedMode
+                    ? "bg-blue-600 text-white shadow-md scale-105"
+                    : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Settings className={`h-4 w-4 ${showAdvancedMode ? "text-white" : "text-gray-600"}`} />
+                  <span>{t("practice.advanced_mode", language)}</span>
+                </div>
+              </button>
+            </div>
+
+            {/* Advanced Mode Settings Panel */}
+            {showAdvancedMode && (
+              <div className="mb-8 rounded-lg border-2 border-blue-200 bg-blue-50 p-6">
+                <h3 className="mb-4 text-base font-semibold text-blue-900 flex items-center gap-2">
+                  <Settings className="h-5 w-5" />
+                  {t("practice.advanced_mode", language)} {t("practice.settings", language)}
+                </h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-blue-800">
+                      {t("practice.feedback_mode", language)}
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setFeedbackMode("calm")}
+                        className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                          feedbackMode === "calm"
+                            ? "bg-blue-600 text-white"
+                            : "bg-white text-blue-700 border border-blue-300 hover:bg-blue-100"
+                        }`}
+                      >
+                        {t("practice.calm_feedback", language)}
+                      </button>
+                      <button
+                        onClick={() => setFeedbackMode("practice")}
+                        className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                          feedbackMode === "practice"
+                            ? "bg-blue-600 text-white"
+                            : "bg-white text-blue-700 border border-blue-300 hover:bg-blue-100"
+                        }`}
+                      >
+                        {t("practice.practice_feedback", language)}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-blue-800">
+                      {t("practice.practice_mode", language)}
+                    </label>
+                    <div className="flex gap-2 flex-wrap">
+                      {[
+                        { value: "normal", label: t("practice.normal_mode", language) },
+                        { value: "accuracy", label: t("practice.accuracy_mode", language) },
+                        { value: "rhythm", label: t("practice.rhythm_mode", language) },
+                      ].map((mode) => (
+                        <button
+                          key={mode.value}
+                          onClick={() => setPracticeMode(mode.value as "normal" | "accuracy" | "rhythm")}
+                          className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                            practiceMode === mode.value
+                              ? "bg-blue-600 text-white"
+                              : "bg-white text-blue-700 border border-blue-300 hover:bg-blue-100"
+                          }`}
+                        >
+                          {mode.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Music Selection */}
+            <div className="space-y-8">
+              {/* Primary: Recommended for You */}
+              <div>
+                <h2 className="mb-4 text-lg font-medium text-gray-900">{t("practice.recommended", language)}</h2>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                  {recommendedSongs.map((song, index) => {
+                    const isTopRecommendation = index === 0 && sessions.length > 0;
+                    return (
+                      <div
+                        key={song.id}
+                        className={`group rounded-lg border-2 p-5 transition-all ${
+                          isTopRecommendation
+                            ? "border-blue-400 bg-blue-50 shadow-sm"
+                            : "border-gray-200 bg-white"
+                        }`}
+                      >
+                        <div className="mb-3 flex items-start justify-between">
+                          <div className="flex-1">
+                            {isTopRecommendation && (
+                              <div className="mb-1 text-xs font-medium text-blue-600">⭐ {t("practice.recommended", language)}</div>
+                            )}
+                            <div className={`text-base font-medium ${
+                              isTopRecommendation ? "text-blue-900" : "text-gray-900"
+                            }`}>
+                              {song.title}
+                            </div>
+                            <div className={`mt-1 text-sm ${isTopRecommendation ? "text-blue-700" : "text-gray-500"}`}>
+                              {song.composer}
+                            </div>
+                            {song.difficulty && (
+                              <div className="mt-1 text-xs text-gray-400">
+                                {"⭐".repeat(song.difficulty)}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleSelectSong(song)}
+                          className="w-full flex items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors shadow-sm"
+                        >
+                          <Play className="h-4 w-4" />
+                          <span>{t("practice.start_practice", language)}</span>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Secondary: Explore Public Music */}
+              <div className="border-t border-gray-200 pt-8">
+                <button
+                  onClick={() => router.push("/explore")}
+                  className="flex w-full items-center justify-between rounded-lg border border-gray-300 bg-white p-4 text-left transition-colors hover:bg-gray-50"
+                >
+                  <div>
+                    <div className="text-base font-medium text-gray-900">{t("practice.explore", language)}</div>
+                    <div className="mt-1 text-sm text-gray-500">{t("practice.explore_desc", language)}</div>
+                  </div>
+                  <ChevronRight className="h-5 w-5 text-gray-400" />
+                </button>
+              </div>
+
+              {/* Tertiary: Upload Your Own */}
+              <div className="border-t border-gray-200 pt-8">
+                <label className="flex w-full cursor-pointer items-center justify-between rounded-lg border border-gray-300 bg-white p-4 transition-colors hover:bg-gray-50">
+                  <div>
+                    <div className="text-base font-medium text-gray-900">{t("practice.upload", language)}</div>
+                    <div className="mt-1 text-sm text-gray-500">{t("practice.upload_desc", language)}</div>
+                  </div>
+                  <Upload className="h-5 w-5 text-gray-400" />
+                  <input
+                    type="file"
+                    accept=".pdf,image/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            </div>
+
+            {/* What Happens Next Preview */}
+            <div className="mt-12 rounded-lg bg-blue-50 border border-blue-100 p-6">
+              <h3 className="mb-4 text-base font-medium text-blue-900">{t("practice.what_next", language)}</h3>
+              <div className="space-y-3 text-sm text-blue-800">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-200 text-xs font-medium text-blue-900">
+                    1
+                  </div>
+                  <div>
+                    <div className="font-medium">{t("practice.countdown", language)}</div>
+                    <div className="text-blue-700">{t("practice.countdown_desc", language)}</div>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-200 text-xs font-medium text-blue-900">
+                    2
+                  </div>
+                  <div>
+                    <div className="font-medium">{t("practice.play_music", language)}</div>
+                    <div className="text-blue-700">{t("practice.play_music_desc", language)}</div>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-200 text-xs font-medium text-blue-900">
+                    3
+                  </div>
+                  <div>
+                    <div className="font-medium">{t("practice.get_feedback", language)}</div>
+                    <div className="text-blue-700">{t("practice.get_feedback_desc", language)}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -166,7 +407,7 @@ export default function MainPage() {
   // User uploads are also real music
   const hasRealMusic = !!activeFileUrl && (selectedPiece?.type === "public_domain" || selectedPiece?.type === "user_upload");
 
-  const handleFileUpload = (file: File) => {
+  const handleFileUploadDirect = (file: File) => {
     if (file && (file.type === "application/pdf" || file.type.startsWith("image/"))) {
       setUploadedFile(file);
       const fileUrl = URL.createObjectURL(file);
@@ -407,7 +648,7 @@ export default function MainPage() {
             fileUrl={activeFileUrl}
             fileType={fileType}
             feedback={feedback}
-            onFileUpload={handleFileUpload}
+            onFileUpload={handleFileUploadDirect}
             isRecording={isRecording}
             tempo={tempo}
             timeSignature={timeSignature}
